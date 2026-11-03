@@ -1,0 +1,171 @@
+diff --git a/src/display/plugins/WebUIPlugin.cpp b/src/display/plugins/WebUIPlugin.cpp
+index f46815e0..9011d923 100644
+--- a/src/display/plugins/WebUIPlugin.cpp
++++ b/src/display/plugins/WebUIPlugin.cpp
+@@ -16,6 +16,7 @@
+ #include <esp_partition.h>
+ #include <mbedtls/platform.h>
+ #include <vector>
++#include <Update.h>
+ #include <version.h>
+
+ static WebUIPlugin *g_webUIPlugin = nullptr;
+@@ -75,6 +76,10 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager)
+ }
+
+ void WebUIPlugin::loop() {
++    if (fwRestartAt != 0 && millis() > fwRestartAt) {
++        ESP_LOGI("FwUpload", "Restarting into uploaded firmware");
++        ESP.restart();
++    }
+     if (updating) {
+         // Pass which component is being flashed: a controller update streams the
+         // firmware over BLE (wants a low-latency link), a display update is over
+@@ -230,6 +235,7 @@ void WebUIPlugin::setupServer() {
+         free(entries);
+         request->send(response);
+     });
++    setupFirmwareUpload();
+     server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) { handleCoreDumpDownload(request); });
+     // The web UI is embedded in firmware flash and served from the memory-mapped blob (see serveWebAsset). It is no
+     // longer in LittleFS, so OTA never touches the partition holding profiles/shots. The catch-all onNotFound handles
+@@ -733,3 +739,121 @@ void WebUIPlugin::handleCoreDumpDownload(AsyncWebServerRequest *request) {
+
+     request->send(response);
+ }
++
++
++// ---------------------------------------------------------------------------
++// [MOD] Manual firmware upload. Writes an app-only image (the file normally
++// flashed at 0x10000) into the inactive OTA slot via the Update library, i.e.
++// the same esp_ota_* path the official GitHub OTA uses: the boot partition is
++// only switched after the complete image has been written and verified
++// (magic byte, chip id, SHA256). An aborted/corrupt upload changes nothing.
++// NVS (settings) and LittleFS (profiles, shots) are never touched.
++// ---------------------------------------------------------------------------
++static const char FW_UPLOAD_PAGE[] PROGMEM = R"HTML(<!doctype html>
++<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
++<title>GaggiMate Firmware-Upload</title>
++<style>
++body{font-family:-apple-system,system-ui,sans-serif;background:#111;color:#eee;margin:0;padding:24px;max-width:520px}
++h1{font-size:20px}p,li{color:#bbb;font-size:14px;line-height:1.5}
++input,button{font-size:16px;margin:12px 0;width:100%}
++button{padding:12px;border:0;border-radius:8px;background:#c8913a;color:#111;font-weight:600}
++button:disabled{opacity:.4}
++progress{width:100%;height:18px}#msg{font-weight:600;margin-top:12px}
++code{background:#222;padding:1px 4px;border-radius:4px}
++</style></head><body>
++<h1>Firmware-Upload (Display)</h1>
++<p>Aktuell: <code>%VERSION%</code></p>
++<ul>
++<li>Nur die <b>APPONLY</b>-Datei (die sonst auf 0x10000 geflasht wird). Keine MERGED-Datei.</li>
++<li>Einstellungen, PID, WLAN und Profile bleiben erhalten.</li>
++<li>Nicht w&auml;hrend eines Bezugs. Seite offen lassen bis &bdquo;Fertig&ldquo;.</li>
++</ul>
++<input type="file" id="f" accept=".bin">
++<button id="b" disabled>Hochladen &amp; flashen</button>
++<progress id="p" value="0" max="100" hidden></progress>
++<div id="msg"></div>
++<script>
++const f=document.getElementById('f'),b=document.getElementById('b'),p=document.getElementById('p'),m=document.getElementById('msg');
++f.onchange=()=>{b.disabled=!f.files.length;m.textContent='';
++ if(f.files.length&&/merged/i.test(f.files[0].name)){b.disabled=true;m.textContent='MERGED-Dateien sind hier nicht erlaubt.';}};
++b.onclick=()=>{const file=f.files[0];if(!file)return;
++ const r=new FileReader();r.onload=()=>{const v=new Uint8Array(r.result);
++  if(v[0]!==0xE9){m.textContent='Keine gültige ESP32-App-Datei.';return;}
++  b.disabled=true;f.disabled=true;p.hidden=false;m.textContent='Wird hochgeladen …';
++  const x=new XMLHttpRequest();x.open('POST','/api/firmware');
++  x.upload.onprogress=e=>{if(e.lengthComputable)p.value=Math.round(e.loaded*100/e.total);};
++  x.onload=()=>{if(x.status===200){p.value=100;m.textContent='Fertig. Display startet neu (ca. 30 s), dann Seite neu laden.';}
++   else{m.textContent='Fehler: '+x.responseText+' – nichts geändert, altes System läuft weiter.';b.disabled=false;f.disabled=false;}};
++  x.onerror=()=>{m.textContent='Verbindung abgebrochen – nichts geändert. Erneut versuchen.';b.disabled=false;f.disabled=false;};
++  const fd=new FormData();fd.append('firmware',file,file.name);x.send(fd);};
++ r.readAsArrayBuffer(file.slice(0,1));};
++</script></body></html>)HTML";
++
++void WebUIPlugin::setupFirmwareUpload() {
++    server.on("/flash", HTTP_GET, [](AsyncWebServerRequest *request) {
++        String page = FPSTR(FW_UPLOAD_PAGE);
++        page.replace("%VERSION%", BUILD_GIT_VERSION);
++        request->send(200, "text/html", page);
++    });
++
++    server.on(
++        "/api/firmware", HTTP_POST,
++        // Request complete
++        [this](AsyncWebServerRequest *request) {
++            if (fwUploadOk) {
++                request->send(200, "text/plain", "OK");
++                fwRestartAt = millis() + 1500; // let the response go out first
++            } else {
++                request->send(400, "text/plain", fwUploadError.isEmpty() ? "Upload fehlgeschlagen" : fwUploadError);
++            }
++            fwUploadActive = false;
++        },
++        // Upload chunks
++        [this](AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len, bool final) {
++            static const char *TAG = "FwUpload";
++            if (index == 0) {
++                fwUploadOk = false;
++                fwUploadError = "";
++                if (fwUploadActive) {
++                    // A previous upload was cut off (client went away): discard it, nothing was switched.
++                    Update.abort();
++                    fwUploadActive = false;
++                }
++                if (updating || controller->isUpdating()) {
++                    fwUploadError = "Es laeuft bereits ein Update";
++                    return;
++                }
++                if (controller->isActive()) {
++                    fwUploadError = "Maschine ist aktiv (Bezug/Dampf/Mahlen) - bitte warten";
++                    return;
++                }
++                if (len == 0 || data[0] != 0xE9) {
++                    fwUploadError = "Keine gueltige App-Datei (Magic-Byte fehlt)";
++                    return;
++                }
++                ESP_LOGI(TAG, "Upload start: %s", filename.c_str());
++                if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
++                    fwUploadError = String("Update.begin: ") + Update.errorString();
++                    return;
++                }
++                fwUploadActive = true;
++            }
++            if (!fwUploadActive || !fwUploadError.isEmpty()) {
++                return;
++            }
++            if (Update.write(data, len) != len) {
++                fwUploadError = String("Schreibfehler: ") + Update.errorString();
++                Update.abort();
++                fwUploadActive = false;
++                return;
++            }
++            if (final) {
++                if (Update.end(true)) {
++                    ESP_LOGI(TAG, "Upload OK, %u bytes", static_cast<unsigned>(index + len));
++                    fwUploadOk = true;
++                } else {
++                    fwUploadError = String("Pruefung fehlgeschlagen: ") + Update.errorString();
++                }
++            }
++        });
++}
+diff --git a/src/display/plugins/WebUIPlugin.h b/src/display/plugins/WebUIPlugin.h
+index 90d3e438..43d9e4fc 100644
+--- a/src/display/plugins/WebUIPlugin.h
++++ b/src/display/plugins/WebUIPlugin.h
+@@ -58,6 +58,13 @@ class WebUIPlugin : public Plugin {
+     // Core dump download
+     void handleCoreDumpDownload(AsyncWebServerRequest *request);
+
++    // [MOD] Manual firmware upload (/flash page + POST /api/firmware)
++    void setupFirmwareUpload();
++    bool fwUploadActive = false;
++    bool fwUploadOk = false;
++    String fwUploadError = "";
++    unsigned long fwRestartAt = 0;
++
+     GitHubOTA *ota = nullptr;
+     AsyncWebServer server;
+     WebSocketHandler wsHandler;

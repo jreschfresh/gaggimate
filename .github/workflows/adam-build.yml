@@ -1,0 +1,234 @@
+name: adam-build
+
+# Builds the official GaggiMate display firmware with the Adam mod (standby image +
+# /flash upload page + OTA pointed at this fork) for every new upstream stable release
+# and publishes it as the fork's latest release together with the UNCHANGED official
+# controller firmware. The display then updates itself from here via the normal
+# "Update" button. See README.md.
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to build, e.g. v1.9.1 (empty = latest stable upstream release)"
+        required: false
+        default: ""
+      force:
+        description: "Rebuild and replace the release even if the fork already has it"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: adam-build
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: jniebuhr/gaggimate
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out mod files (this branch)
+        uses: actions/checkout@v4
+        with:
+          path: fork
+
+      - name: Pick the upstream release
+        id: pick
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          LATEST="$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)"
+          TAG="${INPUT_TAG:-$LATEST}"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unexpected tag '$TAG' (only plain vX.Y.Z releases are built)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "is_latest=$([ "$TAG" = "$LATEST" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "Upstream latest: $LATEST - building: $TAG"
+
+          if [ "$FORCE" != "true" ] && gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "The fork already has $TAG - nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ASSETS="$(gh release view "$TAG" --repo "$UPSTREAM" --json assets --jq '.assets[].name')"
+          for need in board-firmware.bin display-firmware.bin; do
+            if ! grep -qx "$need" <<<"$ASSETS"; then
+              echo "::warning::Upstream $TAG has no $need yet - will retry on the next run."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Download the official firmware files
+        if: steps.pick.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir official
+          gh release download "$TAG" --repo "$UPSTREAM" --dir official \
+            --pattern board-firmware.bin --pattern display-firmware.bin
+          ls -l official
+
+      - name: Check out the upstream source at that tag
+        if: steps.pick.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$TAG" "https://github.com/$UPSTREAM.git" src
+          git -C src log -1 --format='%H %s'
+          ls src/src/display/ui/default
+
+      - uses: actions/setup-python@v5
+        if: steps.pick.outputs.skip != 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Apply the mod
+        if: steps.pick.outputs.skip != 'true'
+        working-directory: src
+        run: |
+          set -euo pipefail
+          MOD="$GITHUB_WORKSPACE/fork/mod"
+          python3 -m pip install --quiet pillow
+          # 1) standby image
+          python3 "$MOD/patch.py" "$MOD/gaggimate_standby.png" . "$RUNNER_TEMP/standby_preview.png"
+          # 2) /flash upload page (exact patch first, anchor fallback if upstream moved)
+          if git apply --check "$MOD/gaggimate_fw_upload_endpoint.patch" 2>/dev/null; then
+            git apply "$MOD/gaggimate_fw_upload_endpoint.patch"
+            echo "Upload patch applied cleanly."
+          else
+            echo "::warning::Upload patch no longer applies cleanly (upstream code moved) - using the anchor fallback."
+            python3 "$MOD/apply_upload_fallback.py" . "$MOD/gaggimate_fw_upload_endpoint.patch"
+          fi
+          # 3) OTA looks for updates in this fork
+          sed -i "s#https://github.com/jniebuhr/gaggimate/releases/#https://github.com/${GITHUB_REPOSITORY}/releases/#" \
+            src/display/plugins/WebUIPlugin.h
+          grep -q "https://github.com/${GITHUB_REPOSITORY}/releases/" src/display/plugins/WebUIPlugin.h
+          grep -q "setupFirmwareUpload" src/display/plugins/WebUIPlugin.h
+          grep -q "setupFirmwareUpload" src/display/plugins/WebUIPlugin.cpp
+          grep -q "img_standby" src/display/ui/default/eez/screens.c
+          git status --short
+
+      - name: Make the firmware version exactly the upstream tag
+        if: steps.pick.outputs.skip != 'true'
+        working-directory: src
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git add -A
+          git -c user.name="adam-build" -c user.email="adam-build@users.noreply.github.com" \
+            commit -q -m "adam mod on $TAG"
+          git tag -f "$TAG"
+          V="$(git describe --tags --dirty --match 'v*')"
+          echo "git describe: $V"
+          if [ "$V" != "$TAG" ]; then
+            echo "::error::Firmware version would be '$V' instead of '$TAG' - that would cause an endless update loop."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.pick.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      - name: Build the web UI
+        if: steps.pick.outputs.skip != 'true'
+        working-directory: src
+        run: ./scripts/build_webui.sh
+
+      - name: Install PlatformIO
+        if: steps.pick.outputs.skip != 'true'
+        run: pip install --upgrade platformio
+
+      - uses: actions/cache@v4
+        if: steps.pick.outputs.skip != 'true'
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-${{ steps.pick.outputs.tag }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      - name: Build the display firmware
+        if: steps.pick.outputs.skip != 'true'
+        working-directory: src
+        run: |
+          set -euo pipefail
+          rm -rf .pio/build/display
+          pio run -e display
+
+      - name: Sanity checks
+        if: steps.pick.outputs.skip != 'true'
+        working-directory: src
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          set -euo pipefail
+          NEW=.pio/build/display/firmware.bin
+          OFFICIAL=../official/display-firmware.bin
+          grep "BUILD_GIT_VERSION" src/version.h
+          grep -q "BUILD_GIT_VERSION \"$TAG\"" src/version.h
+          # embedded web UI must be real (an empty stub would give a blank WebUI)
+          ls -l src/display/webassets
+          test "$(stat -c%s src/display/webassets/web_ui.bin)" -gt 100000
+          # ESP32 app image magic byte
+          test "$(head -c1 "$NEW" | od -An -tx1 | tr -d ' ')" = "e9"
+          # size = official image + standby picture (~691 KB) + upload page (~5 KB)
+          N=$(stat -c%s "$NEW"); O=$(stat -c%s "$OFFICIAL"); D=$((N-O))
+          echo "official=$O mod=$N delta=$D (expected about 696000)"
+          if [ "$D" -lt 650000 ] || [ "$D" -gt 760000 ]; then
+            echo "::error::Size difference $D is outside the expected window - not publishing."
+            exit 1
+          fi
+
+      - name: Publish the release in the fork
+        if: steps.pick.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+          IS_LATEST: ${{ steps.pick.outputs.is_latest }}
+        run: |
+          set -euo pipefail
+          mkdir out
+          cp src/.pio/build/display/firmware.bin out/display-firmware.bin
+          cp official/board-firmware.bin out/board-firmware.bin
+          {
+            echo "Automatic build of the official GaggiMate **$TAG** with the Adam mod."
+            echo
+            echo "- \`display-firmware.bin\`: official display firmware + standby image + \`/flash\` upload page, OTA looks for updates in this fork."
+            echo "- \`board-firmware.bin\`: **unchanged** official controller firmware (copied from the upstream release)."
+            echo "- Upstream release: https://github.com/$UPSTREAM/releases/tag/$TAG"
+            echo
+            echo "SHA-256:"
+            echo '```'
+            (cd out && sha256sum display-firmware.bin board-firmware.bin)
+            echo "official display: $(sha256sum official/display-firmware.bin | cut -d' ' -f1)"
+            echo '```'
+          } > notes.md
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+          gh release create "$TAG" out/display-firmware.bin out/board-firmware.bin \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$TAG (Adam)" --notes-file notes.md --latest="$IS_LATEST"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY"
