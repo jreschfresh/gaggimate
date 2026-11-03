@@ -6,6 +6,8 @@
 // "Jungle" look: reduced Brew / Water / Steam / Grind screens. The background is filled from the bottom,
 // one step per degree, and the screens are changed by swiping left / right.
 
+constexpr int SHOT_STEPS = 20;
+
 enum JungleMode { JM_BREW = 0, JM_WATER = 1, JM_STEAM = 2, JM_GRIND = 3, JM_COUNT = 4 };
 
 struct JungleView {
@@ -22,6 +24,9 @@ struct JungleView {
     bool grindAvailable = false;
     bool confirmVisible = false;
     char confirmText[96] = "";
+    bool shot = false;       // brew screen: a shot is running, the coffee colours rise with the progress
+    float shotFrac = 0.0f;   // 0..1 progress of the shot (grams / target grams, or time)
+    bool hold = false;       // the shot just ended: show the final amount for a moment, no buttons
 };
 
 class JungleUI {
@@ -36,6 +41,7 @@ class JungleUI {
     bool consumeStopRequested();
     void requestStop() { stopRequested = true; }
     bool grindAvailable = false;
+    void screenLoaded(); // called by the LVGL load events
 
   private:
     struct Page {
@@ -53,12 +59,17 @@ class JungleUI {
         lv_obj_t *flush = nullptr;
         lv_obj_t *confirm = nullptr;
         lv_obj_t *confirmLabel = nullptr;
+        lv_obj_t *stripes[SHOT_STEPS] = {nullptr}; // brew screen: coffee-coloured steps, one per 1/20 of the shot
+        int shotSteps = -1;
+        int shotMask = -1;
         int fillHeight = -1;
         int coverMask = -1; // steam screen: which texts sit on the colour (dark) or on black (light)
     };
     Page pages[JM_COUNT];
     int shownMode = -1;
     bool stopRequested = false;
+    bool loadPending = false;
+    uint32_t loadStarted = 0;
 
     void build(int mode);
     void setFill(Page &p, int height);

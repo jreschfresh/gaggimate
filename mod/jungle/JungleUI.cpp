@@ -37,6 +37,20 @@ bool g_active[JM_COUNT] = {false};
 
 lv_color_t col(uint32_t c) { return lv_color_hex(c); }
 
+// Coffee colours of the shot steps: dark brown at the bottom, over mid brown, to cream at the top.
+uint32_t coffeeColor(int i) {
+    const int dark[3] = {0x2B, 0x16, 0x08}, mid[3] = {0x8A, 0x5A, 0x33}, cream[3] = {0xF1, 0xE2, 0xC6};
+    const float t = static_cast<float>(i) / static_cast<float>(SHOT_STEPS - 1);
+    const int *a = t < 0.5f ? dark : mid;
+    const int *b = t < 0.5f ? mid : cream;
+    const float u = t < 0.5f ? t / 0.5f : (t - 0.5f) / 0.5f;
+    int c[3];
+    for (int k = 0; k < 3; k++) {
+        c[k] = static_cast<int>(lroundf(a[k] + (b[k] - a[k]) * u));
+    }
+    return (static_cast<uint32_t>(c[0]) << 16) | (static_cast<uint32_t>(c[1]) << 8) | static_cast<uint32_t>(c[2]);
+}
+
 lv_obj_t *plain(lv_obj_t *parent) {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_style_all(o);
@@ -255,6 +269,13 @@ void plusCb(lv_event_t *e) {
     }
 }
 
+void loadedCb(lv_event_t *e) {
+    (void)e;
+    if (g_ui != nullptr) {
+        g_ui->screenLoaded();
+    }
+}
+
 void confirmBackCb(lv_event_t *e) { action_on_warning_back(e); }
 void confirmOkCb(lv_event_t *e) { action_on_warning_ignore(e); }
 
@@ -279,6 +300,8 @@ void JungleUI::build(int mode) {
     lv_obj_set_style_bg_color(p.scr, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(p.scr, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_add_event_cb(p.scr, gestureCb, LV_EVENT_GESTURE, ud);
+    lv_obj_add_event_cb(p.scr, loadedCb, LV_EVENT_SCREEN_LOAD_START, nullptr);
+    lv_obj_add_event_cb(p.scr, loadedCb, LV_EVENT_SCREEN_LOADED, nullptr);
 
     // Background: a clipping box at the bottom, with the full-size gradient inside it, so the colours
     // stay where they are and only more of them is uncovered.
@@ -292,6 +315,19 @@ void JungleUI::build(int mode) {
     lv_obj_set_style_bg_grad_dir(p.grad, LV_GRAD_DIR_VER, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(p.grad, LV_OPA_COVER, LV_PART_MAIN);
     setFill(p, SIZE);
+
+    if (mode == JM_BREW) {
+        const int h = SIZE / SHOT_STEPS;
+        for (int i = 0; i < SHOT_STEPS; i++) {
+            lv_obj_t *st = plain(p.scr);
+            lv_obj_set_size(st, SIZE, h + 1);
+            lv_obj_set_pos(st, 0, SIZE - (i + 1) * h);
+            lv_obj_set_style_bg_color(st, col(coffeeColor(i)), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(st, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_add_flag(st, LV_OBJ_FLAG_HIDDEN);
+            p.stripes[i] = st;
+        }
+    }
 
     // Top row: temperature (and pressure).
     p.temp = label(p.scr, &jungle_font_22, t.text);
@@ -416,18 +452,34 @@ void JungleUI::show(int mode) {
     if (mode < 0 || mode >= JM_COUNT || pages[mode].scr == nullptr) {
         mode = JM_BREW;
     }
-    if (shownMode == mode && lv_scr_act() == pages[mode].scr) {
+    if (shownMode == mode && (lv_scr_act() == pages[mode].scr || loadPending)) {
         return;
     }
+    // Slide in from the side the screen sits on; fade in when we come from one of the old screens.
+    lv_scr_load_anim_t anim = LV_SCR_LOAD_ANIM_FADE_IN;
+    uint32_t ms = 250;
+    for (int m = 0; m < JM_COUNT; m++) {
+        if (m != mode && lv_scr_act() == pages[m].scr) {
+            anim = findOrderIndex(mode) > findOrderIndex(m) ? LV_SCR_LOAD_ANIM_MOVE_LEFT : LV_SCR_LOAD_ANIM_MOVE_RIGHT;
+            ms = 300;
+        }
+    }
     shownMode = mode;
-    lv_scr_load(pages[mode].scr);
+    loadPending = true;
+    loadStarted = lv_tick_get();
+    lv_scr_load_anim(pages[mode].scr, anim, ms, 0, false);
 }
+
+void JungleUI::screenLoaded() { loadPending = false; }
 
 bool JungleUI::isShown() const {
     if (shownMode < 0) {
         return false;
     }
-    return lv_scr_act() == pages[shownMode].scr;
+    if (lv_scr_act() == pages[shownMode].scr) {
+        return true;
+    }
+    return loadPending && lv_tick_elaps(loadStarted) < 600; // the slide has not started yet
 }
 
 bool JungleUI::consumeStopRequested() {
@@ -441,7 +493,7 @@ void JungleUI::update(const JungleView &v) {
         return;
     }
     grindAvailable = v.grindAvailable;
-    g_active[v.mode] = v.active;
+    g_active[v.mode] = v.active || v.hold;
     Page &p = pages[v.mode];
 
     // Background fill: one step per degree.
@@ -462,7 +514,34 @@ void JungleUI::update(const JungleView &v) {
     if (frac < 0.0f) {
         frac = 0.0f;
     }
+    const bool shotShown = v.mode == JM_BREW && (v.shot || v.hold);
+    if (shotShown) {
+        frac = 1.0f; // the orange stays complete, the coffee colours rise through it
+    }
     setFill(p, static_cast<int>(lroundf(frac * SIZE)));
+
+    if (v.mode == JM_BREW) {
+        int steps = 0;
+        if (shotShown) {
+            steps = static_cast<int>(floorf(fminf(fmaxf(v.shotFrac, 0.0f), 1.0f) * SHOT_STEPS + 0.001f));
+        }
+        if (steps != p.shotSteps) {
+            p.shotSteps = steps;
+            for (int i = 0; i < SHOT_STEPS; i++) {
+                hide(p.stripes[i], i >= steps);
+            }
+        }
+        // Light coffee colours at the top need dark text.
+        const int mask = (steps >= 19 ? 1 : 0) | (steps >= 20 ? 2 : 0) | (shotShown ? 4 : 0);
+        if (mask != p.shotMask) {
+            p.shotMask = mask;
+            const uint32_t light = 0xFFEEDE, dark = 0x3A2410;
+            lv_obj_set_style_text_color(p.temp, col(mask & 1 ? dark : light), LV_PART_MAIN);
+            lv_obj_set_style_text_color(p.bar, col(mask & 1 ? dark : light), LV_PART_MAIN);
+            lv_obj_set_style_text_color(p.center, col(mask & 2 ? dark : light), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(p.stop, col(mask & 4 ? 0x5A2D12 : THEMES[JM_BREW].glyph), LV_PART_MAIN);
+        }
+    }
 
     if (v.mode == JM_STEAM) {
         // The beige steam colour needs dark text, but the part of the screen that is still black needs light text.
@@ -512,6 +591,7 @@ void JungleUI::update(const JungleView &v) {
     }
 
     if (p.start != nullptr) {
+        hide(p.start, v.hold);
         if (v.active) {
             hide(p.play, true);
             hide(p.stop, false);
@@ -521,7 +601,7 @@ void JungleUI::update(const JungleView &v) {
         }
     }
     if (p.flush != nullptr) {
-        if (v.active) {
+        if (v.active || v.hold) {
             hide(p.flush, true);
         } else {
             hide(p.flush, false);

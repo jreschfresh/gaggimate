@@ -45,6 +45,7 @@ h = sub_alt(h, ["    void updateState();\n    bool isProShot();", "    void upda
     bool jungleShown = false;
     ScreensEnum jungleScreen = ScreensEnum::SCREEN_ID_BREW_SCREEN;
     volatile bool brewEndPending = false;
+    unsigned long brewEndAt = 0;
 """ + old[len("    void updateState();\n"):], "h:members")
 
 # ---- DefaultUI.cpp
@@ -63,6 +64,7 @@ c = sub(c, '    pluginManager->on("controller:brew:clear",', '''    // After a s
         }
         std::lock_guard<std::recursive_mutex> guard(controller->getProcessLock());
         if (controller->getLastProcess() != nullptr) { // a flush clears itself before the event arrives
+            brewEndAt = ::millis();
             brewEndPending = true;
             rerender = true;
         }
@@ -70,9 +72,12 @@ c = sub(c, '    pluginManager->on("controller:brew:clear",', '''    // After a s
     pluginManager->on("controller:brew:clear",''', "cpp:brewend")
 c = sub(c, """        handleScreenChange();
         currentScreen = static_cast<ScreensEnum>(eez_flow_get_current_screen());""", """        if (brewEndPending) {
-            brewEndPending = false;
+            // The final amount stays on screen for 2 seconds, then it slides on to Steam.
             const ScreensEnum shown = activeScreen();
-            if (jungleShown && (shown == SCREEN_ID_STATUS_SCREEN || shown == SCREEN_ID_BREW_SCREEN)) {
+            if (!(jungleShown && (shown == SCREEN_ID_STATUS_SCREEN || shown == SCREEN_ID_BREW_SCREEN))) {
+                brewEndPending = false;
+            } else if (::millis() - brewEndAt >= 2000) {
+                brewEndPending = false;
                 controller->clear();
                 action_on_steam_screen(nullptr);
             }
@@ -80,6 +85,8 @@ c = sub(c, """        handleScreenChange();
         handleScreenChange();
         currentScreen = activeScreen();
         updateJungle();""", "cpp:loop")
+c = sub(c, "    if (rerender) {\n        rerender = false;\n        lastRender = now;",
+        "    if (brewEndPending && diff > RERENDER_INTERVAL_ACTIVE) {\n        rerender = true;\n    }\n\n    if (rerender) {\n        rerender = false;\n        lastRender = now;", "cpp:holdtick")
 c = sub_alt(c, ["    ui_init();\n    gaugeSetpointsInside", "    ui_init();\n    setupState();"],
             lambda old: "    ui_init();\n    jungle.init();\n" + old[len("    ui_init();\n"):], "cpp:setup")
 c = sub(c, """        eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
@@ -139,6 +146,12 @@ void DefaultUI::updateJungle() {
         v.fillTarget = profileManager->getSelectedProfile().temperature;
         v.showWeight = controller->isVolumetricAvailable();
         v.weight = static_cast<float>(activeWeight);
+        v.hold = brewEndPending;
+        v.shot = v.active;
+        v.shotFrac = brewProcess.elapsed_percentage() / 100.0f;
+        if (v.showWeight && brewProcess.profile_target_weight() > 0.0f) {
+            v.shotFrac = v.weight / brewProcess.profile_target_weight();
+        }
         break;
     case JM_WATER:
         v.fillTarget = controller->getTargetTemp();
