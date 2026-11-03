@@ -8,11 +8,11 @@ index f46815e0..9011d923 100644
  #include <vector>
 +#include <Update.h>
  #include <version.h>
-
+ 
  static WebUIPlugin *g_webUIPlugin = nullptr;
 @@ -75,6 +76,10 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager)
  }
-
+ 
  void WebUIPlugin::loop() {
 +    if (fwRestartAt != 0 && millis() > fwRestartAt) {
 +        ESP_LOGI("FwUpload", "Restarting into uploaded firmware");
@@ -30,7 +30,7 @@ index f46815e0..9011d923 100644
      // The web UI is embedded in firmware flash and served from the memory-mapped blob (see serveWebAsset). It is no
      // longer in LittleFS, so OTA never touches the partition holding profiles/shots. The catch-all onNotFound handles
 @@ -733,3 +739,121 @@ void WebUIPlugin::handleCoreDumpDownload(AsyncWebServerRequest *request) {
-
+ 
      request->send(response);
  }
 +
@@ -158,7 +158,7 @@ index 90d3e438..43d9e4fc 100644
 @@ -58,6 +58,13 @@ class WebUIPlugin : public Plugin {
      // Core dump download
      void handleCoreDumpDownload(AsyncWebServerRequest *request);
-
+ 
 +    // [MOD] Manual firmware upload (/flash page + POST /api/firmware)
 +    void setupFirmwareUpload();
 +    bool fwUploadActive = false;
