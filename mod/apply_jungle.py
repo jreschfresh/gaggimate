@@ -25,10 +25,19 @@ def sub(text, old, new, label):
     return text.replace(old, new, 1)
 
 
+def sub_alt(text, olds, make, label):
+    """Try several anchors (different upstream versions); make(old) returns the replacement."""
+    for old in olds:
+        if old in text:
+            return text.replace(old, make(old), 1)
+    missing.append(label)
+    return text
+
+
 # ---- DefaultUI.h
 h = sub(h, "#include <display/ui/default/eez/structs.h>\n",
         "#include <display/ui/default/eez/structs.h>\n#include <display/ui/default/jungle/JungleUI.h>\n", "h:include")
-h = sub(h, "    void updateState();\n    bool isProShot();", """    void updateState();
+h = sub_alt(h, ["    void updateState();\n    bool isProShot();", "    void updateState();\n    void updateSystemStatus();"], lambda old: """    void updateState();
     // Jungle look (reduced Brew / Water / Steam / Grind screens, see jungle/JungleUI.h)
     void updateJungle();
     ScreensEnum activeScreen() const;
@@ -36,11 +45,11 @@ h = sub(h, "    void updateState();\n    bool isProShot();", """    void updateS
     bool jungleShown = false;
     ScreensEnum jungleScreen = ScreensEnum::SCREEN_ID_BREW_SCREEN;
     volatile bool brewEndPending = false;
-    bool isProShot();""", "h:members")
+""" + old[len("    void updateState();\n"):], "h:members")
 
 # ---- DefaultUI.cpp
-c = sub(c, "#include <display/ui/default/eez/images.h>\n",
-        "#include <display/ui/default/eez/actions.h>\n#include <display/ui/default/eez/images.h>\n", "cpp:include")
+c = sub_alt(c, ["#include <display/ui/default/eez/images.h>\n", "#include <display/ui/default/eez/ui.h>\n"],
+            lambda old: "#include <display/ui/default/eez/actions.h>\n" + old, "cpp:include")
 c = sub(c, "if (eez_flow_get_current_screen() == SCREEN_ID_STATUS_SCREEN) {",
         "if (activeScreen() == SCREEN_ID_STATUS_SCREEN) {", "cpp:status")
 c = sub(c, "if (eez_flow_get_current_screen() != SCREEN_ID_BREW_SCREEN)",
@@ -71,7 +80,8 @@ c = sub(c, """        handleScreenChange();
         handleScreenChange();
         currentScreen = activeScreen();
         updateJungle();""", "cpp:loop")
-c = sub(c, "    ui_init();\n    gaugeSetpointsInside", "    ui_init();\n    jungle.init();\n    gaugeSetpointsInside", "cpp:setup")
+c = sub_alt(c, ["    ui_init();\n    gaugeSetpointsInside", "    ui_init();\n    setupState();"],
+            lambda old: "    ui_init();\n    jungle.init();\n" + old[len("    ui_init();\n"):], "cpp:setup")
 c = sub(c, """        eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
 """, """        const bool toJungle = targetScreen == SCREEN_ID_BREW_SCREEN || targetScreen == SCREEN_ID_STATUS_SCREEN ||
                               targetScreen == SCREEN_ID_STEAM_SCREEN || targetScreen == SCREEN_ID_WATER_SCREEN ||
@@ -94,9 +104,10 @@ c = sub(c, """        eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0
         jungleShown = false;
         eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
 """, "cpp:screenchange")
-c = sub(c, "if (currentScreen == SCREEN_ID_STATUS_SCREEN && currentScreen == targetScreen)",
-        "if (!jungleShown && currentScreen == SCREEN_ID_STATUS_SCREEN && currentScreen == targetScreen)", "cpp:tick")
-c = sub(c, "// The chart needs pressure data, so it only applies to Pro profiles", '''ScreensEnum DefaultUI::activeScreen() const {
+# optional: only newer upstream versions animate the gauge ticks here
+c = c.replace("if (currentScreen == SCREEN_ID_STATUS_SCREEN && currentScreen == targetScreen)",
+              "if (!jungleShown && currentScreen == SCREEN_ID_STATUS_SCREEN && currentScreen == targetScreen)", 1)
+c = sub_alt(c, ["// The chart needs pressure data, so it only applies to Pro profiles", "void DefaultUI::handleScreenChange() {"], lambda old: '''ScreensEnum DefaultUI::activeScreen() const {
     if (jungleShown && jungle.isShown()) {
         return jungleScreen;
     }
@@ -163,7 +174,14 @@ void DefaultUI::updateJungle() {
     jungle.update(v);
 }
 
-// The chart needs pressure data, so it only applies to Pro profiles''', "cpp:funcs")
+''' + old, "cpp:funcs")
+
+# upstream differences between versions: weight member name, dual boiler support
+if "double activeWeight" not in h:
+    c = c.replace("activeWeight", "bluetoothWeight")
+if "int dualBoiler" not in h:
+    c = c.replace("        if (dualBoiler) {\n            v.temp = controller->getCurrentSteamTemp();\n            v.fillTarget = controller->getTargetSteamTemp();\n        } else {\n            v.fillTarget = controller->getTargetTemp();\n        }\n",
+                  "        v.fillTarget = controller->getTargetTemp();\n")
 
 if missing:
     print("Jungle look NOT applied, anchors missing: " + ", ".join(missing))
