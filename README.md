@@ -13,7 +13,9 @@ offiziellen Controller-Firmware (`board-firmware.bin`, 1:1 von Upstream kopiert)
 Im WebUI (Einstellungen → System, Kanal „stable") lädt der normale **Update**-Knopf
 Display + Controller aus diesem Fork; das Standby-Bild bleibt.
 
-## Ablauf (`.github/workflows/adam-build.yml`)
+## Ablauf
+
+Der Ablauf liegt auf dem Standard-Zweig `master` (`.github/workflows/adam-build.yml` – nur dort läuft der Zeitplan), die Mod-Dateien liegen hier auf `adam`. Die Release-Tags zeigen auf diesen Zweig, der keine Abläufe enthält, damit ein Tag nichts auslöst.
 
 Täglich 05:23 UTC (und per „Run workflow"):
 
