@@ -86,7 +86,7 @@ c = sub(c, """        handleScreenChange();
         currentScreen = activeScreen();
         updateJungle();""", "cpp:loop")
 c = sub(c, "    if (rerender) {\n        rerender = false;\n        lastRender = now;",
-        "    if (brewEndPending && diff > RERENDER_INTERVAL_ACTIVE) {\n        rerender = true;\n    }\n\n    if (rerender) {\n        rerender = false;\n        lastRender = now;", "cpp:holdtick")
+        "    if ((brewEndPending || (jungleShown && jungleScreen == SCREEN_ID_STEAM_SCREEN)) && diff > RERENDER_INTERVAL_ACTIVE) {\n        rerender = true;\n    }\n\n    if (rerender) {\n        rerender = false;\n        lastRender = now;", "cpp:holdtick")
 c = sub_alt(c, ["    ui_init();\n    gaugeSetpointsInside", "    ui_init();\n    setupState();"],
             lambda old: "    ui_init();\n    jungle.init();\n" + old[len("    ui_init();\n"):], "cpp:setup")
 c = sub(c, """        eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
@@ -149,6 +149,7 @@ void DefaultUI::updateJungle() {
         v.hold = brewEndPending;
         v.shot = v.active;
         v.shotFrac = brewProcess.elapsed_percentage() / 100.0f;
+        strlcpy(v.timeText, brewProcess.elapsed_time(), sizeof(v.timeText));
         if (v.showWeight && brewProcess.profile_target_weight() > 0.0f) {
             v.shotFrac = v.weight / brewProcess.profile_target_weight();
         }
@@ -196,6 +197,19 @@ if "int dualBoiler" not in h:
     c = c.replace("        if (dualBoiler) {\n            v.temp = controller->getCurrentSteamTemp();\n            v.fillTarget = controller->getTargetSteamTemp();\n        } else {\n            v.fillTarget = controller->getTargetTemp();\n        }\n",
                   "        v.fillTarget = controller->getTargetTemp();\n")
 
+# ---- Plus Jakarta Sans instead of the built-in Montserrat in the EEZ screens (optional)
+import re
+screens = os.path.join(ui, "eez", "screens.c")
+sc = None
+if os.path.exists(screens):
+    sc = open(screens).read()
+    sc2 = re.sub(r"&lv_font_montserrat_(14|16|18|20|24|34)\b", r"&pj_font_\1", sc)
+    if sc2 != sc:
+        k = sc2.find("#include")
+        sc = sc2[:k] + "#include <display/ui/default/jungle/pj_fonts.h>\n" + sc2[k:]
+    else:
+        sc = None
+
 if missing:
     print("Jungle look NOT applied, anchors missing: " + ", ".join(missing))
     sys.exit(1)
@@ -206,4 +220,6 @@ for f in os.listdir(os.path.join(mod, "jungle")):
     shutil.copy(os.path.join(mod, "jungle", f), dst)
 open(hp, "w").write(h)
 open(cp, "w").write(c)
+if sc is not None:
+    open(screens, "w").write(sc)
 print("Jungle look applied.")

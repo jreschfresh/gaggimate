@@ -26,6 +26,7 @@ struct JungleView {
     char confirmText[96] = "";
     bool shot = false;       // brew screen: a shot is running, the coffee colours rise with the progress
     float shotFrac = 0.0f;   // 0..1 progress of the shot (grams / target grams, or time)
+    char timeText[12] = ""; // brew screen: elapsed time of the shot
     bool hold = false;       // the shot just ended: show the final amount for a moment, no buttons
 };
 
@@ -60,6 +61,10 @@ class JungleUI {
         lv_obj_t *confirm = nullptr;
         lv_obj_t *confirmLabel = nullptr;
         lv_obj_t *stripes[SHOT_STEPS] = {nullptr}; // brew screen: coffee-coloured steps, one per 1/20 of the shot
+        lv_obj_t *time = nullptr;
+        bool steamReached = false; // steam screen: the target temperature was reached once -> pressure view
+        int steamBarMode = -1;
+        int fillTargetH = -1;
         int shotSteps = -1;
         int shotMask = -1;
         int fillHeight = -1;
@@ -73,6 +78,8 @@ class JungleUI {
 
     void build(int mode);
     void setFill(Page &p, int height);
+    void setFillAnimated(Page &p, int height);
+    static void fillAnimCb(void *var, int32_t v);
 };
 
 #endif

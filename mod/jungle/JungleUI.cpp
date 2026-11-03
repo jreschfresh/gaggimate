@@ -7,6 +7,7 @@
 LV_FONT_DECLARE(jungle_font_104)
 LV_FONT_DECLARE(jungle_font_80)
 LV_FONT_DECLARE(jungle_font_22)
+LV_FONT_DECLARE(pj_font_24)
 
 namespace {
 
@@ -98,6 +99,28 @@ void playGlyphDraw(lv_event_t *e) {
     lv_point_t p[3] = {{(lv_coord_t)(a.x1 + 12), (lv_coord_t)(a.y1 + 5)},
                        {(lv_coord_t)(a.x1 + 42), (lv_coord_t)(a.y1 + 24)},
                        {(lv_coord_t)(a.x1 + 12), (lv_coord_t)(a.y1 + 43)}};
+    lv_draw_polygon(ctx, &d, p, 3);
+}
+
+// Water drop (flush button): a circle with a point on top.
+void dropDraw(lv_event_t *e) {
+    lv_obj_t *o = lv_event_get_target(e);
+    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    const int cx = (a.x1 + a.x2) / 2;
+    const int cy = (a.y1 + a.y2) / 2;
+    lv_draw_rect_dsc_t d;
+    lv_draw_rect_dsc_init(&d);
+    d.bg_color = lv_obj_get_style_text_color(o, LV_PART_MAIN);
+    d.bg_opa = LV_OPA_COVER;
+    d.border_width = 0;
+    d.radius = LV_RADIUS_CIRCLE;
+    lv_area_t c = {(lv_coord_t)(cx - 8), (lv_coord_t)(cy - 3), (lv_coord_t)(cx + 8), (lv_coord_t)(cy + 13)};
+    lv_draw_rect(ctx, &d, &c);
+    d.radius = 0;
+    lv_point_t p[3] = {{(lv_coord_t)cx, (lv_coord_t)(cy - 14)}, {(lv_coord_t)(cx + 8), (lv_coord_t)(cy + 3)},
+                       {(lv_coord_t)(cx - 8), (lv_coord_t)(cy + 3)}};
     lv_draw_polygon(ctx, &d, p, 3);
 }
 
@@ -344,6 +367,9 @@ void JungleUI::build(int mode) {
     p.center = label(p.scr, bigFont, t.text);
     centerLabel(p.center, SIZE / 2, mode == JM_BREW || mode == JM_STEAM ? 202 : 200, 300);
     if (mode == JM_BREW) {
+        p.time = label(p.scr, &jungle_font_22, t.text);
+        centerLabel(p.time, SIZE / 2, 284, 120);
+        lv_obj_add_flag(p.time, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(p.center, LV_OBJ_FLAG_CLICKABLE); // long press tares the scale
         lv_obj_add_event_cb(p.center, tareCb, LV_EVENT_LONG_PRESSED, nullptr);
     }
@@ -408,9 +434,11 @@ void JungleUI::build(int mode) {
         lv_obj_set_style_bg_opa(p.flush, LV_OPA_60, LV_PART_MAIN | LV_STATE_PRESSED);
         lv_obj_set_ext_click_area(p.flush, 15);
         lv_obj_add_event_cb(p.flush, flushCb, LV_EVENT_PRESSED, nullptr);
-        lv_obj_t *drop = label(p.flush, &lv_font_montserrat_24, t.text);
-        lv_label_set_text(drop, LV_SYMBOL_TINT);
+        lv_obj_t *drop = plain(p.flush);
+        lv_obj_set_size(drop, SMALL_BTN, SMALL_BTN);
         lv_obj_center(drop);
+        lv_obj_set_style_text_color(drop, col(t.text), LV_PART_MAIN);
+        lv_obj_add_event_cb(drop, dropDraw, LV_EVENT_DRAW_MAIN_END, nullptr);
 
         // Warning confirmation (the controller asks before it starts a brew with an error-level warning).
         p.confirm = plain(p.scr);
@@ -418,7 +446,7 @@ void JungleUI::build(int mode) {
         lv_obj_add_flag(p.confirm, LV_OBJ_FLAG_CLICKABLE); // swallows touches behind it
         lv_obj_set_style_bg_color(p.confirm, lv_color_black(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(p.confirm, LV_OPA_90, LV_PART_MAIN);
-        p.confirmLabel = label(p.confirm, &lv_font_montserrat_24, 0xFFEEDE);
+        p.confirmLabel = label(p.confirm, &pj_font_24, 0xFFEEDE);
         lv_obj_set_size(p.confirmLabel, 320, LV_SIZE_CONTENT);
         lv_label_set_long_mode(p.confirmLabel, LV_LABEL_LONG_WRAP);
         lv_obj_set_pos(p.confirmLabel, 80, 120);
@@ -452,6 +480,37 @@ void JungleUI::setFill(Page &p, int height) {
     lv_obj_set_pos(p.grad, 0, height - SIZE);
 }
 
+void JungleUI::fillAnimCb(void *var, int32_t v) {
+    Page *p = static_cast<Page *>(var);
+    if (g_ui != nullptr) {
+        g_ui->setFill(*p, v);
+    }
+}
+
+void JungleUI::setFillAnimated(Page &p, int height) {
+    if (height < 0)
+        height = 0;
+    if (height > SIZE)
+        height = SIZE;
+    if (height == p.fillTargetH) {
+        return;
+    }
+    p.fillTargetH = height;
+    lv_anim_del(&p, fillAnimCb);
+    const int from = p.fillHeight < 0 ? height : p.fillHeight;
+    if (from == height) {
+        return;
+    }
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, &p);
+    lv_anim_set_exec_cb(&a, fillAnimCb);
+    lv_anim_set_values(&a, from, height);
+    lv_anim_set_time(&a, 350);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
 void JungleUI::show(int mode) {
     if (mode < 0 || mode >= JM_COUNT || pages[mode].scr == nullptr) {
         mode = JM_BREW;
@@ -467,6 +526,10 @@ void JungleUI::show(int mode) {
             anim = findOrderIndex(mode) > findOrderIndex(m) ? LV_SCR_LOAD_ANIM_MOVE_LEFT : LV_SCR_LOAD_ANIM_MOVE_RIGHT;
             ms = 300;
         }
+    }
+    if (mode == JM_STEAM) {
+        pages[JM_STEAM].steamReached = false;
+        pages[JM_STEAM].steamBarMode = -1;
     }
     shownMode = mode;
     loadPending = true;
@@ -522,7 +585,30 @@ void JungleUI::update(const JungleView &v) {
     if (shotShown) {
         frac = 1.0f; // the orange stays complete, the coffee colours rise through it
     }
-    setFill(p, static_cast<int>(lroundf(frac * SIZE)));
+    int fillH = static_cast<int>(lroundf(frac * SIZE));
+    bool steamBar = false;
+    if (v.mode == JM_STEAM) {
+        // First the steam boiler heats up (the fill follows the temperature). Once the target was reached, the
+        // screen switches to the pressure view: the big number and the fill follow the bar value.
+        if (v.fillTarget > 0.0f && v.temp >= v.fillTarget - 1.0f) {
+            p.steamReached = true;
+        } else if (v.temp < v.fillTarget - 20.0f) {
+            p.steamReached = false;
+        }
+        steamBar = p.steamReached && v.pressureAvailable;
+        if (steamBar) {
+            const float full = 2.0f; // bar at which the display is completely filled
+            float f = v.pressure / full;
+            f = fminf(fmaxf(f, 0.04f), 1.0f);
+            fillH = static_cast<int>(lroundf(f * SIZE));
+        }
+        if (steamBar != (p.steamBarMode == 1)) {
+            p.steamBarMode = steamBar ? 1 : 0;
+        }
+        setFillAnimated(p, fillH);
+    } else {
+        setFill(p, fillH);
+    }
 
     if (v.mode == JM_BREW) {
         int steps = 0;
@@ -549,7 +635,7 @@ void JungleUI::update(const JungleView &v) {
 
     if (v.mode == JM_STEAM) {
         // The beige steam colour needs dark text, but the part of the screen that is still black needs light text.
-        const int topY = SIZE - p.fillHeight;
+        const int topY = SIZE - (p.fillTargetH >= 0 ? p.fillTargetH : p.fillHeight);
         const int mask = (topY <= 30 ? 1 : 0) | (topY <= 175 ? 2 : 0) | (topY <= 190 ? 4 : 0);
         if (mask != p.coverMask) {
             p.coverMask = mask;
@@ -578,6 +664,14 @@ void JungleUI::update(const JungleView &v) {
     }
 
     if (v.mode == JM_BREW) {
+        if (p.time != nullptr) {
+            if (shotShown && v.timeText[0] != 0) {
+                setText(p.time, v.timeText);
+                hide(p.time, false);
+            } else {
+                hide(p.time, true);
+            }
+        }
         if (v.showWeight) {
             snprintf(buf, sizeof(buf), "%.1f", v.weight);
             setText(p.center, buf);
@@ -587,7 +681,7 @@ void JungleUI::update(const JungleView &v) {
         }
     } else {
         setText(p.center, v.centerText);
-        if (v.showCenter) {
+        if (v.mode == JM_STEAM ? steamBar : v.showCenter) {
             hide(p.center, false);
         } else {
             hide(p.center, true);
