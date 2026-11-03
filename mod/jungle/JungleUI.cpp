@@ -233,8 +233,8 @@ void gestureCb(lv_event_t *e) {
         return;
     }
     lv_indev_wait_release(indev);
-    if (g_active[mode]) {
-        return; // never leave a running process by accident
+    if (g_active[mode] && mode != JM_STEAM) {
+        return; // never leave a running brew / water / grind by accident (Steam may always be left)
     }
     if (dir == LV_DIR_TOP) {
         action_on_standby(e); // swipe up: standby (the Adam picture)
