@@ -128,6 +128,15 @@ jobs:
           grep -q "setupFirmwareUpload" src/display/plugins/WebUIPlugin.h
           grep -q "setupFirmwareUpload" src/display/plugins/WebUIPlugin.cpp
           grep -q "img_standby" src/display/ui/default/eez/screens.c
+          # 4) Jungle look (reduced Brew / Water / Steam / Grind screens). Optional: if upstream moved the code it
+          #    hooks into, the build carries on with the normal screens and says so in the release notes.
+          if python3 "$MOD/apply_jungle.py" . "$MOD"; then
+            echo "JUNGLE=1" >> "$GITHUB_ENV"
+            grep -q "updateJungle" src/display/ui/default/DefaultUI.cpp
+          else
+            echo "::warning::Jungle look could not be applied (upstream code moved) - building with the normal screens."
+            echo "JUNGLE=0" >> "$GITHUB_ENV"
+          fi
           git status --short
 
       - name: Make the firmware version exactly the upstream tag
@@ -197,10 +206,12 @@ jobs:
           test "$(stat -c%s src/display/webassets/web_ui.bin)" -gt 100000
           # ESP32 app image magic byte
           test "$(head -c1 "$NEW" | od -An -tx1 | tr -d ' ')" = "e9"
-          # size = official image + standby picture (~691 KB) + upload page (~5 KB)
+          # size = official image + standby picture (~691 KB) + upload page (~5 KB) [+ Jungle look fonts and screens]
           N=$(stat -c%s "$NEW"); O=$(stat -c%s "$OFFICIAL"); D=$((N-O))
-          echo "official=$O mod=$N delta=$D (expected about 696000)"
-          if [ "$D" -lt 650000 ] || [ "$D" -gt 760000 ]; then
+          LOW=650000; HIGH=760000
+          if [ "${JUNGLE:-0}" = "1" ]; then LOW=700000; HIGH=900000; fi
+          echo "official=$O mod=$N delta=$D (allowed $LOW..$HIGH, jungle=${JUNGLE:-0})"
+          if [ "$D" -lt "$LOW" ] || [ "$D" -gt "$HIGH" ]; then
             echo "::error::Size difference $D is outside the expected window - not publishing."
             exit 1
           fi
@@ -219,6 +230,11 @@ jobs:
             echo "Automatic build of the official GaggiMate **$TAG** with the Adam mod."
             echo
             echo "- \`display-firmware.bin\`: official display firmware + standby image + \`/flash\` upload page, OTA looks for updates in this fork."
+            if [ "${JUNGLE:-0}" = "1" ]; then
+              echo "- Display look: **Jungle** (reduced Brew / Water / Steam / Grind screens, swipe left/right between modes, jumps to Steam after a shot)."
+            else
+              echo "- Display look: normal screens (the Jungle look could not be applied to this upstream version)."
+            fi
             echo "- \`board-firmware.bin\`: **unchanged** official controller firmware (copied from the upstream release)."
             echo "- Upstream release: https://github.com/$UPSTREAM/releases/tag/$TAG"
             echo
