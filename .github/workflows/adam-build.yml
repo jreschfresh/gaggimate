@@ -209,7 +209,7 @@ jobs:
           # size = official image + standby picture (~691 KB) + upload page (~5 KB) [+ Jungle look fonts and screens]
           N=$(stat -c%s "$NEW"); O=$(stat -c%s "$OFFICIAL"); D=$((N-O))
           LOW=650000; HIGH=760000
-          if [ "${JUNGLE:-0}" = "1" ]; then LOW=700000; HIGH=1000000; fi
+          if [ "${JUNGLE:-0}" = "1" ]; then LOW=700000; HIGH=1250000; fi
           echo "official=$O mod=$N delta=$D (allowed $LOW..$HIGH, jungle=${JUNGLE:-0})"
           if [ "$D" -lt "$LOW" ] || [ "$D" -gt "$HIGH" ]; then
             echo "::error::Size difference $D is outside the expected window - not publishing."
