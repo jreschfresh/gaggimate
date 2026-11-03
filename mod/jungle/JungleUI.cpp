@@ -84,22 +84,37 @@ void centerLabel(lv_obj_t *l, int cx, int cy, int width) {
     lv_obj_set_pos(l, cx - width / 2, cy - h / 2);
 }
 
+// Filled triangle with softly rounded corners: the polygon plus round-capped lines along its edges.
+void roundedTriangle(lv_draw_ctx_t *ctx, lv_color_t color, const lv_point_t *p, int rounding) {
+    lv_draw_rect_dsc_t d;
+    lv_draw_rect_dsc_init(&d);
+    d.bg_color = color;
+    d.bg_opa = LV_OPA_COVER;
+    d.radius = 0;
+    d.border_width = 0;
+    lv_draw_polygon(ctx, &d, p, 3);
+    lv_draw_line_dsc_t l;
+    lv_draw_line_dsc_init(&l);
+    l.color = color;
+    l.opa = LV_OPA_COVER;
+    l.width = rounding;
+    l.round_start = 1;
+    l.round_end = 1;
+    for (int i = 0; i < 3; i++) {
+        lv_draw_line(ctx, &l, &p[i], &p[(i + 1) % 3]);
+    }
+}
+
 void playGlyphDraw(lv_event_t *e) {
     lv_obj_t *o = lv_event_get_target(e);
     lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
     lv_area_t a;
     lv_obj_get_coords(o, &a);
-    lv_draw_rect_dsc_t d;
-    lv_draw_rect_dsc_init(&d);
-    d.bg_color = lv_obj_get_style_text_color(o, LV_PART_MAIN);
-    d.bg_opa = LV_OPA_COVER;
-    d.radius = 0;
-    d.border_width = 0;
-    // Triangle in a 48 x 48 box, pointing right.
-    lv_point_t p[3] = {{(lv_coord_t)(a.x1 + 12), (lv_coord_t)(a.y1 + 5)},
-                       {(lv_coord_t)(a.x1 + 42), (lv_coord_t)(a.y1 + 24)},
-                       {(lv_coord_t)(a.x1 + 12), (lv_coord_t)(a.y1 + 43)}};
-    lv_draw_polygon(ctx, &d, p, 3);
+    // Triangle in a 48 x 48 box, pointing right, with soft corners.
+    lv_point_t p[3] = {{(lv_coord_t)(a.x1 + 15), (lv_coord_t)(a.y1 + 9)},
+                       {(lv_coord_t)(a.x1 + 38), (lv_coord_t)(a.y1 + 24)},
+                       {(lv_coord_t)(a.x1 + 15), (lv_coord_t)(a.y1 + 39)}};
+    roundedTriangle(ctx, lv_obj_get_style_text_color(o, LV_PART_MAIN), p, 8);
 }
 
 // Water drop (flush button): a circle with a point on top.
@@ -118,17 +133,16 @@ void dropDraw(lv_event_t *e) {
     d.radius = LV_RADIUS_CIRCLE;
     lv_area_t c = {(lv_coord_t)(cx - 8), (lv_coord_t)(cy - 3), (lv_coord_t)(cx + 8), (lv_coord_t)(cy + 13)};
     lv_draw_rect(ctx, &d, &c);
-    d.radius = 0;
-    lv_point_t p[3] = {{(lv_coord_t)cx, (lv_coord_t)(cy - 14)}, {(lv_coord_t)(cx + 8), (lv_coord_t)(cy + 3)},
-                       {(lv_coord_t)(cx - 8), (lv_coord_t)(cy + 3)}};
-    lv_draw_polygon(ctx, &d, p, 3);
+    lv_point_t p[3] = {{(lv_coord_t)cx, (lv_coord_t)(cy - 12)}, {(lv_coord_t)(cx + 7), (lv_coord_t)(cy + 2)},
+                       {(lv_coord_t)(cx - 7), (lv_coord_t)(cy + 2)}};
+    roundedTriangle(ctx, lv_obj_get_style_text_color(o, LV_PART_MAIN), p, 4);
 }
 
 void mkBar(lv_obj_t *parent, int x, int y, int w, int h, uint32_t color) {
     lv_obj_t *b = plain(parent);
     lv_obj_set_size(b, w, h);
     lv_obj_set_pos(b, x, y);
-    lv_obj_set_style_radius(b, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, LV_PART_MAIN); // round ends
     lv_obj_set_style_bg_color(b, col(color), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN);
 }
@@ -412,7 +426,7 @@ void JungleUI::build(int mode) {
         p.stop = plain(p.start);
         lv_obj_set_size(p.stop, 30, 30);
         lv_obj_center(p.stop);
-        lv_obj_set_style_radius(p.stop, 5, LV_PART_MAIN);
+        lv_obj_set_style_radius(p.stop, 9, LV_PART_MAIN);
         lv_obj_set_style_bg_color(p.stop, col(t.glyph), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(p.stop, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_add_flag(p.stop, LV_OBJ_FLAG_HIDDEN);
