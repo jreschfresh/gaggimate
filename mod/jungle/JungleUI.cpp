@@ -192,7 +192,7 @@ void gestureCb(lv_event_t *e) {
         return;
     }
     const lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT && dir != LV_DIR_TOP) {
+    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT && dir != LV_DIR_TOP && dir != LV_DIR_BOTTOM) {
         return;
     }
     lv_indev_wait_release(indev);
@@ -200,7 +200,11 @@ void gestureCb(lv_event_t *e) {
         return; // never leave a running process by accident
     }
     if (dir == LV_DIR_TOP) {
-        action_on_menu_click(e);
+        action_on_standby(e); // swipe up: standby (the Adam picture)
+        return;
+    }
+    if (dir == LV_DIR_BOTTOM) {
+        action_on_menu_click(e); // swipe down: the old menu (Info, Profile, ...)
         return;
     }
     const int step = dir == LV_DIR_LEFT ? 1 : -1;
