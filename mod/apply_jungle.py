@@ -210,6 +210,15 @@ if os.path.exists(screens):
     else:
         sc = None
 
+# ---- Steam heats the last degrees faster: stronger proportional gain in steam mode only (optional)
+ctl = os.path.join(repo, "src/display/core/Controller.cpp")
+ctl_txt = None
+if os.path.exists(ctl):
+    t = open(ctl).read()
+    anchor = "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n"
+    if anchor in t and "[MOD] steam Kp" not in t:
+        ctl_txt = t.replace(anchor, "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n" + anchor, 1)
+
 if missing:
     print("Jungle look NOT applied, anchors missing: " + ", ".join(missing))
     sys.exit(1)
@@ -222,4 +231,7 @@ open(hp, "w").write(h)
 open(cp, "w").write(c)
 if sc is not None:
     open(screens, "w").write(sc)
+if ctl_txt is not None:
+    open(ctl, "w").write(ctl_txt)
+    print("Steam Kp boost applied.")
 print("Jungle look applied.")

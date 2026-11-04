@@ -26,7 +26,7 @@ struct Theme {
 const Theme THEMES[JM_COUNT] = {
     {0xE5850F, 0xC32D11, 0xFFEEDE, 0xFFEEDE, 0xC32D11}, // brew: orange
     {0x35B6E8, 0x123A9C, 0xFFEEDE, 0xFFEEDE, 0x123A9C}, // water: blue
-    {0xEAD9B8, 0xB9976A, 0x3A2410, 0x3A2410, 0xEAD9B8}, // steam: beige
+    {0xFF9EC4, 0xC2185B, 0xFFEEDE, 0xFFEEDE, 0xC2185B}, // steam: pink
     {0x7CC47F, 0x1F6B3A, 0xFFEEDE, 0xFFEEDE, 0x1F6B3A}, // grind: green
 };
 
@@ -388,17 +388,11 @@ void JungleUI::build(int mode) {
         lv_obj_add_event_cb(p.center, tareCb, LV_EVENT_LONG_PRESSED, nullptr);
     }
 
-    if (mode != JM_BREW) {
+    if (mode != JM_BREW && mode != JM_STEAM) { // Steam has no + / - buttons
         p.minus = roundButton(p.scr, 48, 187, t.text, false);
         p.plus = roundButton(p.scr, 376, 187, t.text, true);
         lv_obj_add_event_cb(p.minus, minusCb, LV_EVENT_CLICKED, ud);
         lv_obj_add_event_cb(p.plus, plusCb, LV_EVENT_CLICKED, ud);
-        if (mode == JM_STEAM) { // the dark backing would look muddy on the beige
-            lv_obj_set_style_bg_opa(p.minus, LV_OPA_TRANSP, LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(p.plus, LV_OPA_TRANSP, LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(p.minus, LV_OPA_20, LV_PART_MAIN | LV_STATE_PRESSED);
-            lv_obj_set_style_bg_opa(p.plus, LV_OPA_20, LV_PART_MAIN | LV_STATE_PRESSED);
-        }
     }
 
     // Big start / stop button in the lower third (the steam screen has none: steam follows the machine switch).
@@ -648,18 +642,7 @@ void JungleUI::update(const JungleView &v) {
     }
 
     if (v.mode == JM_STEAM) {
-        // The beige steam colour needs dark text, but the part of the screen that is still black needs light text.
-        const int topY = SIZE - (p.fillTargetH >= 0 ? p.fillTargetH : p.fillHeight);
-        const int mask = (topY <= 30 ? 1 : 0) | (topY <= 175 ? 2 : 0) | (topY <= 190 ? 4 : 0);
-        if (mask != p.coverMask) {
-            p.coverMask = mask;
-            const uint32_t light = 0xEAD9B8;
-            const uint32_t dark = 0x3A2410;
-            lv_obj_set_style_text_color(p.temp, col(mask & 1 ? dark : light), LV_PART_MAIN);
-            lv_obj_set_style_text_color(p.center, col(mask & 2 ? dark : light), LV_PART_MAIN);
-            recolorButton(p.minus, mask & 4 ? dark : light);
-            recolorButton(p.plus, mask & 4 ? dark : light);
-        }
+        // The pink fill carries the same light text as the other screens, so nothing needs recolouring.
     }
 
     char buf[32];
