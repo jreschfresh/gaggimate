@@ -28,6 +28,9 @@ struct JungleView {
     float shotFrac = 0.0f;   // 0..1 progress of the shot (grams / target grams, or time)
     char timeText[12] = ""; // brew screen: elapsed time of the shot
     bool hold = false;       // the shot just ended: show the final amount for a moment, no buttons
+    bool cool = false;       // steam screen: cool-down mode (water through the steam wand) is on
+    float coolStart = 0.0f;  // temperature when the cool-down was switched on
+    float coolTarget = 0.0f; // brew temperature the cool-down aims for
 };
 
 class JungleUI {
@@ -40,6 +43,11 @@ class JungleUI {
     void update(const JungleView &view);
     // Set by the stop button, so the UI can tell a manual stop from a finished shot.
     bool consumeStopRequested();
+    // Snowflake on the steam screen / 25 or 80 degree buttons on the water screen.
+    bool consumeCoolToggle();
+    int consumeWaterPreset(); // 0 = nothing pressed, otherwise the temperature
+    void requestCoolToggle() { coolToggle = true; }
+    void requestWaterPreset(int t) { waterPreset = t; }
     void requestStop() { stopRequested = true; }
     bool grindAvailable = false;
     void screenLoaded(); // called by the LVGL load events
@@ -62,6 +70,12 @@ class JungleUI {
         lv_obj_t *confirmLabel = nullptr;
         lv_obj_t *stripes[SHOT_STEPS] = {nullptr}; // brew screen: coffee-coloured steps, one per 1/20 of the shot
         lv_obj_t *time = nullptr;
+        lv_obj_t *snow = nullptr;      // steam screen: snowflake button
+        lv_obj_t *snowGlyph = nullptr;
+        lv_obj_t *preset[2] = {nullptr, nullptr}; // water screen: 25 / 80 degree buttons
+        lv_obj_t *presetLabel[2] = {nullptr, nullptr};
+        int coolState = -1;
+        int presetState = -1;
         bool steamReached = false; // steam screen: the target temperature was reached once -> pressure view
         int steamBarMode = -1;
         int fillTargetH = -1;
@@ -73,6 +87,8 @@ class JungleUI {
     Page pages[JM_COUNT];
     int shownMode = -1;
     bool stopRequested = false;
+    bool coolToggle = false;
+    int waterPreset = 0;
     bool loadPending = false;
     uint32_t loadStarted = 0;
 

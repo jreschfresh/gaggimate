@@ -310,6 +310,53 @@ void plusCb(lv_event_t *e) {
     }
 }
 
+// Snowflake: three lines through the centre, each arm with a small fork near its tip.
+void snowDraw(lv_event_t *e) {
+    lv_obj_t *o = lv_event_get_target(e);
+    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    const float cx = (a.x1 + a.x2) / 2.0f;
+    const float cy = (a.y1 + a.y2) / 2.0f;
+    lv_draw_line_dsc_t l;
+    lv_draw_line_dsc_init(&l);
+    l.color = lv_obj_get_style_text_color(o, LV_PART_MAIN);
+    l.opa = LV_OPA_COVER;
+    l.width = 4;
+    l.round_start = 1;
+    l.round_end = 1;
+    const float R = 26.0f;
+    for (int i = 0; i < 6; i++) {
+        const float ang = i * 3.14159265f / 3.0f - 3.14159265f / 2.0f;
+        const float dx = cosf(ang), dy = sinf(ang);
+        lv_point_t p0 = {(lv_coord_t)lroundf(cx), (lv_coord_t)lroundf(cy)};
+        lv_point_t p1 = {(lv_coord_t)lroundf(cx + dx * R), (lv_coord_t)lroundf(cy + dy * R)};
+        lv_draw_line(ctx, &l, &p0, &p1);
+        // fork at 60 % of the arm
+        const float bx = cx + dx * R * 0.62f, by = cy + dy * R * 0.62f;
+        for (int s = -1; s <= 1; s += 2) {
+            const float fa = ang + s * 0.75f;
+            lv_point_t f0 = {(lv_coord_t)lroundf(bx), (lv_coord_t)lroundf(by)};
+            lv_point_t f1 = {(lv_coord_t)lroundf(bx + cosf(fa) * 9.0f), (lv_coord_t)lroundf(by + sinf(fa) * 9.0f)};
+            lv_draw_line(ctx, &l, &f0, &f1);
+        }
+    }
+}
+
+void snowCb(lv_event_t *e) {
+    (void)e;
+    if (g_ui != nullptr) {
+        g_ui->requestCoolToggle();
+    }
+}
+
+void presetCb(lv_event_t *e) {
+    const int t = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+    if (g_ui != nullptr) {
+        g_ui->requestWaterPreset(t);
+    }
+}
+
 void loadedCb(lv_event_t *e) {
     (void)e;
     if (g_ui != nullptr) {
@@ -388,11 +435,54 @@ void JungleUI::build(int mode) {
         lv_obj_add_event_cb(p.center, tareCb, LV_EVENT_LONG_PRESSED, nullptr);
     }
 
-    if (mode != JM_BREW && mode != JM_STEAM) { // Steam has no + / - buttons
+    if (mode == JM_WATER) { // two temperature presets: 25 (cold) and 80 (tea)
+        for (int i = 0; i < 2; i++) {
+            lv_obj_t *b = lv_obj_create(p.scr);
+            lv_obj_remove_style_all(b);
+            lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_size(b, SMALL_BTN + 8, SMALL_BTN + 8);
+            lv_obj_set_pos(b, i == 0 ? 44 : 372, 183);
+            lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+            lv_obj_set_style_border_width(b, 2, LV_PART_MAIN);
+            lv_obj_set_style_border_color(b, col(t.text), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(b, lv_color_black(), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(b, LV_OPA_30, LV_PART_MAIN);
+            lv_obj_set_ext_click_area(b, 12);
+            lv_obj_add_event_cb(b, presetCb, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(i == 0 ? 25 : 80)));
+            lv_obj_t *lb = label(b, &jungle_font_22, t.text);
+            setText(lb, i == 0 ? "25" : "80");
+            lv_obj_center(lb);
+            p.preset[i] = b;
+            p.presetLabel[i] = lb;
+        }
+    }
+    if (mode == JM_GRIND) {
         p.minus = roundButton(p.scr, 48, 187, t.text, false);
         p.plus = roundButton(p.scr, 376, 187, t.text, true);
         lv_obj_add_event_cb(p.minus, minusCb, LV_EVENT_CLICKED, ud);
         lv_obj_add_event_cb(p.plus, plusCb, LV_EVENT_CLICKED, ud);
+    }
+
+    if (mode == JM_STEAM) { // snowflake: cool down through the steam wand
+        p.snow = lv_obj_create(p.scr);
+        lv_obj_remove_style_all(p.snow);
+        lv_obj_clear_flag(p.snow, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(p.snow, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(p.snow, 96, 96);
+        lv_obj_set_pos(p.snow, (SIZE - 96) / 2, 334);
+        lv_obj_set_style_radius(p.snow, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_border_width(p.snow, 3, LV_PART_MAIN);
+        lv_obj_set_style_border_color(p.snow, col(t.text), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(p.snow, col(t.text), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(p.snow, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_ext_click_area(p.snow, 20);
+        lv_obj_add_event_cb(p.snow, snowCb, LV_EVENT_CLICKED, nullptr);
+        p.snowGlyph = plain(p.snow);
+        lv_obj_set_size(p.snowGlyph, 96, 96);
+        lv_obj_center(p.snowGlyph);
+        lv_obj_set_style_text_color(p.snowGlyph, col(t.text), LV_PART_MAIN);
+        lv_obj_add_event_cb(p.snowGlyph, snowDraw, LV_EVENT_DRAW_MAIN_END, nullptr);
     }
 
     // Big start / stop button in the lower third (the steam screen has none: steam follows the machine switch).
@@ -557,6 +647,18 @@ bool JungleUI::isShown() const {
     return loadPending && lv_tick_elaps(loadStarted) < 600; // the slide has not started yet
 }
 
+bool JungleUI::consumeCoolToggle() {
+    const bool r = coolToggle;
+    coolToggle = false;
+    return r;
+}
+
+int JungleUI::consumeWaterPreset() {
+    const int r = waterPreset;
+    waterPreset = 0;
+    return r;
+}
+
 bool JungleUI::consumeStopRequested() {
     const bool r = stopRequested;
     stopRequested = false;
@@ -595,7 +697,14 @@ void JungleUI::update(const JungleView &v) {
     }
     int fillH = static_cast<int>(lroundf(frac * SIZE));
     bool steamBar = false;
-    if (v.mode == JM_STEAM) {
+    if (v.mode == JM_STEAM && v.cool) {
+        // Cool-down: the fill rises from the dark red at the bottom towards the brew colour as the temperature falls.
+        const float span = v.coolStart - v.coolTarget;
+        float f = span > 1.0f ? (v.coolStart - v.temp) / span : 1.0f;
+        f = fminf(fmaxf(f, 0.04f), 1.0f);
+        fillH = static_cast<int>(lroundf(f * SIZE));
+        setFillAnimated(p, fillH);
+    } else if (v.mode == JM_STEAM) {
         // First the steam boiler heats up (the fill follows the temperature). Once the target was reached, the
         // screen switches to the pressure view: the big number and the fill follow the bar value.
         if (v.fillTarget > 0.0f && v.temp >= v.fillTarget - 1.0f) {
@@ -645,6 +754,36 @@ void JungleUI::update(const JungleView &v) {
         // The pink fill carries the same light text as the other screens, so nothing needs recolouring.
     }
 
+    if (v.mode == JM_STEAM && p.snow != nullptr) {
+        const int cs = v.cool ? 1 : 0;
+        if (cs != p.coolState) {
+            p.coolState = cs;
+            const Theme &t = THEMES[JM_STEAM];
+            lv_obj_set_style_bg_opa(p.snow, cs ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_text_color(p.snowGlyph, col(cs ? 0x7A0C0C : t.text), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(p.grad, col(cs ? 0xE5850F : t.top), LV_PART_MAIN);
+            lv_obj_set_style_bg_grad_color(p.grad, col(cs ? 0x7A0C0C : t.bottom), LV_PART_MAIN);
+            lv_obj_invalidate(p.snowGlyph);
+        }
+    }
+    if (v.mode == JM_WATER && p.preset[0] != nullptr) {
+        const int sel = v.fillTarget >= 60.0f ? 1 : 0;
+        if (sel != p.presetState) {
+            p.presetState = sel;
+            const Theme &t = THEMES[JM_WATER];
+            // Tea (80 degrees) is green, cold water (25 degrees) stays blue.
+            const uint32_t top = sel ? 0xA8D96B : t.top;
+            const uint32_t bottom = sel ? 0x2E7D32 : t.bottom;
+            lv_obj_set_style_bg_color(p.grad, col(top), LV_PART_MAIN);
+            lv_obj_set_style_bg_grad_color(p.grad, col(bottom), LV_PART_MAIN);
+            for (int i = 0; i < 2; i++) {
+                lv_obj_set_style_bg_color(p.preset[i], i == sel ? col(t.text) : lv_color_black(), LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(p.preset[i], i == sel ? LV_OPA_COVER : LV_OPA_30, LV_PART_MAIN);
+                lv_obj_set_style_text_color(p.presetLabel[i], col(i == sel ? bottom : t.text), LV_PART_MAIN);
+            }
+        }
+    }
+
     char buf[32];
     if (v.pressureAvailable && v.mode != JM_STEAM) {
         snprintf(buf, sizeof(buf), "%d \xC2\xB0""C", deg);
@@ -659,6 +798,8 @@ void JungleUI::update(const JungleView &v) {
         lv_obj_set_x(p.temp, 180); // centred when it stands alone
         hide(p.bar, true);
     }
+
+    hide(p.temp, v.mode == JM_STEAM && v.cool);
 
     if (v.mode == JM_BREW) {
         if (p.time != nullptr) {
@@ -678,7 +819,11 @@ void JungleUI::update(const JungleView &v) {
         }
     } else {
         setText(p.center, v.centerText);
-        if (v.mode == JM_STEAM ? steamBar : v.showCenter) {
+        if (v.mode == JM_STEAM && v.cool) {
+            snprintf(buf, sizeof(buf), "%d\xC2\xB0", deg);
+            setText(p.center, buf);
+            hide(p.center, false);
+        } else if (v.mode == JM_STEAM ? steamBar : v.showCenter) {
             hide(p.center, false);
         } else {
             hide(p.center, true);

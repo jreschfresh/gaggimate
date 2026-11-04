@@ -51,6 +51,14 @@ h = sub_alt(h, ["    void updateState();\n    bool isProShot();", "    void upda
 # ---- DefaultUI.cpp
 c = sub_alt(c, ["#include <display/ui/default/eez/images.h>\n", "#include <display/ui/default/eez/ui.h>\n"],
             lambda old: "#include <display/ui/default/eez/actions.h>\n" + old, "cpp:include")
+# state of the steam-screen cool-down and the water-screen tea preset
+c = sub_alt(c, ["#include <display/ui/default/eez/ui.h>\n", "#include <display/ui/default/eez/images.h>\n"],
+            lambda old: old + """
+static bool g_coolMode = false;    // steam screen: cool-down through the steam wand is on
+static float g_coolStart = 0.0f;   // temperature when it was switched on
+static int g_savedWaterTemp = 25;  // water target to restore afterwards
+static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen
+""", "cpp:statics")
 c = sub(c, "if (eez_flow_get_current_screen() == SCREEN_ID_STATUS_SCREEN) {",
         "if (activeScreen() == SCREEN_ID_STATUS_SCREEN) {", "cpp:status")
 c = sub(c, "if (eez_flow_get_current_screen() != SCREEN_ID_BREW_SCREEN)",
@@ -82,6 +90,53 @@ c = sub(c, """        handleScreenChange();
                 action_on_steam_screen(nullptr);
             }
         }
+        // Steam screen: snowflake = cool down with water through the steam wand until the brew temperature is reached.
+        if (jungleShown && jungleScreen == SCREEN_ID_STEAM_SCREEN) {
+            if (jungle.consumeCoolToggle()) {
+                if (g_coolMode) {
+                    g_coolMode = false;
+                    controller->getSettings().setTargetWaterTemp(g_savedWaterTemp);
+                    controller->deactivate();
+                    action_on_steam_screen(nullptr); // back to normal steam
+                } else {
+                    g_coolMode = true;
+                    g_coolStart = controller->getCurrentTemp();
+                    g_savedWaterTemp = controller->getSettings().getTargetWaterTemp();
+                    controller->deactivate();
+                    controller->setMode(MODE_WATER);
+                    controller->setTargetTemp(25.0f); // heater off, the pump pushes cold water into the boiler
+                    controller->activate();
+                    rerender = true;
+                }
+            }
+        } else {
+            jungle.consumeCoolToggle();
+        }
+        if (g_coolMode) {
+            const bool onSteam = jungleShown && jungleScreen == SCREEN_ID_STEAM_SCREEN;
+            if (!onSteam) { // the steam screen was left: back to normal, the next steam is a regular one
+                g_coolMode = false;
+                controller->getSettings().setTargetWaterTemp(g_savedWaterTemp);
+            } else if (controller->getCurrentTemp() <= profileManager->getSelectedProfile().temperature + 1.0f) {
+                g_coolMode = false;
+                controller->getSettings().setTargetWaterTemp(g_savedWaterTemp);
+                controller->deactivate();
+                action_on_brew_screen(nullptr); // cool enough: on to brewing
+            }
+        }
+        // Water screen: 25 / 80 degree presets (80 = tea). Leaving the water screen sets 25 again.
+        {
+            const bool onWater = jungleShown && jungleScreen == SCREEN_ID_WATER_SCREEN;
+            const int preset = jungle.consumeWaterPreset();
+            if (preset > 0 && onWater) {
+                controller->setTargetTemp(static_cast<float>(preset));
+                g_teaUsed = preset != 25;
+            }
+            if (!onWater && g_teaUsed && !g_coolMode) {
+                controller->getSettings().setTargetWaterTemp(25);
+                g_teaUsed = false;
+            }
+        }
         handleScreenChange();
         currentScreen = activeScreen();
         updateJungle();""", "cpp:loop")
@@ -111,6 +166,8 @@ c = sub(c, """        eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0
         jungleShown = false;
         eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
 """, "cpp:screenchange")
+c = sub(c, "        case MODE_WATER:\n            changeScreen(SCREEN_ID_WATER_SCREEN);\n            break;",
+        "        case MODE_WATER:\n            if (!g_coolMode) {\n                changeScreen(SCREEN_ID_WATER_SCREEN);\n            }\n            break;", "cpp:watermode")
 # optional: only newer upstream versions animate the gauge ticks here
 c = c.replace("if (currentScreen == SCREEN_ID_STATUS_SCREEN && currentScreen == targetScreen)",
               "if (!jungleShown && currentScreen == SCREEN_ID_STATUS_SCREEN && currentScreen == targetScreen)", 1)
@@ -169,6 +226,9 @@ void DefaultUI::updateJungle() {
         snprintf(buf, sizeof(buf), "%.1f", pressure);
         strlcpy(v.centerText, buf, sizeof(v.centerText));
         v.showCenter = pressureAvailable;
+        v.cool = g_coolMode;
+        v.coolStart = g_coolStart;
+        v.coolTarget = profileManager->getSelectedProfile().temperature;
         break;
     default:
         v.fillTarget = 0.0f;
