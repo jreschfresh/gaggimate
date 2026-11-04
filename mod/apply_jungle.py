@@ -105,7 +105,6 @@ c = sub(c, """        handleScreenChange();
                     controller->deactivate();
                     controller->setMode(MODE_WATER);
                     controller->setTargetTemp(25.0f); // heater off, the pump pushes cold water into the boiler
-                    controller->activate();
                     rerender = true;
                 }
             }
@@ -117,6 +116,9 @@ c = sub(c, """        handleScreenChange();
             if (!onSteam) { // the steam screen was left: back to normal, the next steam is a regular one
                 g_coolMode = false;
                 controller->getSettings().setTargetWaterTemp(g_savedWaterTemp);
+            } else if (controller->getCurrentTemp() > profileManager->getSelectedProfile().temperature + 1.0f &&
+                       controller->getMode() == MODE_WATER && !controller->isActive()) {
+                controller->activate(); // the short steam-fill pump run ends first, then the cooling pump keeps running
             } else if (controller->getCurrentTemp() <= profileManager->getSelectedProfile().temperature + 1.0f) {
                 g_coolMode = false;
                 controller->getSettings().setTargetWaterTemp(g_savedWaterTemp);
