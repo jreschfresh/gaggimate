@@ -56,6 +56,8 @@ c = sub_alt(c, ["#include <display/ui/default/eez/ui.h>\n", "#include <display/u
             lambda old: old + """
 static bool g_coolMode = false;    // steam screen: cool-down through the steam wand is on
 static float g_coolStart = 0.0f;   // temperature when it was switched on
+static unsigned long g_coolPumpAt = 0; // when the 5 s cooling pump run started (0 = not yet)
+static bool g_coolPumpDone = false;    // the 5 s pump run is over: only the open steam wand cools now
 static int g_savedWaterTemp = 25;  // water target to restore afterwards
 static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen
 """, "cpp:statics")
@@ -100,6 +102,8 @@ c = sub(c, """        handleScreenChange();
                     action_on_steam_screen(nullptr); // back to normal steam
                 } else {
                     g_coolMode = true;
+                    g_coolPumpAt = 0;
+                    g_coolPumpDone = false;
                     g_coolStart = controller->getCurrentTemp();
                     g_savedWaterTemp = controller->getSettings().getTargetWaterTemp();
                     controller->deactivate();
@@ -117,8 +121,12 @@ c = sub(c, """        handleScreenChange();
                 g_coolMode = false;
                 controller->getSettings().setTargetWaterTemp(g_savedWaterTemp);
             } else if (controller->getCurrentTemp() > profileManager->getSelectedProfile().temperature + 1.0f &&
-                       controller->getMode() == MODE_WATER && !controller->isActive()) {
-                controller->activate(); // the short steam-fill pump run ends first, then the cooling pump keeps running
+                       controller->getMode() == MODE_WATER && !g_coolPumpDone && g_coolPumpAt == 0 && !controller->isActive()) {
+                controller->activate(); // the short steam-fill pump run ends first, then the cooling pump runs for 5 s
+                g_coolPumpAt = ::millis();
+            } else if (g_coolPumpAt != 0 && !g_coolPumpDone && ::millis() - g_coolPumpAt >= 5000) {
+                g_coolPumpDone = true; // 5 s of cold water are in, the rest cools through the open steam wand
+                controller->deactivate();
             } else if (controller->getCurrentTemp() <= profileManager->getSelectedProfile().temperature + 1.0f) {
                 g_coolMode = false;
                 controller->getSettings().setTargetWaterTemp(g_savedWaterTemp);
