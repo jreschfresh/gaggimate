@@ -210,14 +210,62 @@ if os.path.exists(screens):
     else:
         sc = None
 
-# ---- Steam heats the last degrees faster: stronger proportional gain in steam mode only (optional)
+# ---- Controller tweaks (optional, each one is skipped when its anchor is not found)
+#  1. Steam heats the last degrees faster: stronger proportional gain in steam mode only.
+#  2. After more than 1 h of standby (or a fresh boot) a 3 s flush runs once when the brew temperature is reached.
 ctl = os.path.join(repo, "src/display/core/Controller.cpp")
 ctl_txt = None
 if os.path.exists(ctl):
     t = open(ctl).read()
-    anchor = "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n"
-    if anchor in t and "[MOD] steam Kp" not in t:
-        ctl_txt = t.replace(anchor, "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n" + anchor, 1)
+    done = []
+
+    def ctl_sub(old, new, label):
+        global t
+        if old in t and new not in t:
+            t = t.replace(old, new, 1)
+            done.append(label)
+
+    ctl_sub("    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n",
+            "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n"
+            "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n", "steam Kp")
+    if "[MOD] auto flush" not in t:
+        a1 = "void Controller::loopLogic() {\n"
+        a2 = "    steamReady = false;\n\n    updateLastAction();\n"
+        a3 = "    const int duration = settings.getFlushDuration();\n"
+        a4 = "    // Check if steam is ready\n"
+        if all(x in t for x in (a1, a2, a3, a4)):
+            t = t.replace(a1, """// [MOD] auto flush: after >1 h of standby (or a fresh boot) one 3 s flush runs when the brew temperature is reached.
+static unsigned long g_standbySince = 0;
+static bool g_autoFlushArmed = false;
+static int g_flushOverrideS = 0;
+
+""" + a1, 1)
+            t = t.replace(a2, """    if (mode == MODE_STANDBY && previousMode != MODE_STANDBY) {
+        g_standbySince = millis(); // [MOD] auto flush
+    }
+    if (previousMode == MODE_STANDBY && mode == MODE_BREW && (g_standbySince == 0 || millis() - g_standbySince > 3600000UL)) {
+        g_autoFlushArmed = true; // [MOD] auto flush
+    } else if (mode != MODE_BREW) {
+        g_autoFlushArmed = false;
+    }
+""" + a2, 1)
+            t = t.replace(a3, "    const int duration = g_flushOverrideS > 0 ? g_flushOverrideS : settings.getFlushDuration();\n", 1)
+            t = t.replace(a4, """    if (g_autoFlushArmed) { // [MOD] auto flush
+        if (mode != MODE_BREW || isActive()) {
+            g_autoFlushArmed = false;
+        } else if (currentTemp > 30.f && currentTemp + 1.f >= getTargetTemp()) {
+            g_autoFlushArmed = false;
+            g_flushOverrideS = 3;
+            onFlush();
+            g_flushOverrideS = 0;
+        }
+    }
+
+""" + a4, 1)
+            done.append("auto flush")
+    if done:
+        ctl_txt = t
+        print("Controller tweaks applied: " + ", ".join(done))
 
 if missing:
     print("Jungle look NOT applied, anchors missing: " + ", ".join(missing))
@@ -233,5 +281,4 @@ if sc is not None:
     open(screens, "w").write(sc)
 if ctl_txt is not None:
     open(ctl, "w").write(ctl_txt)
-    print("Steam Kp boost applied.")
 print("Jungle look applied.")
