@@ -785,15 +785,16 @@ void JungleUI::update(const JungleView &v) {
     }
 
     char buf[32];
+    const int shownDeg = v.mode == JM_BREW ? static_cast<int>(lroundf(v.temp)) : deg; // brew: round at .5
     if (v.pressureAvailable && v.mode != JM_STEAM) {
-        snprintf(buf, sizeof(buf), "%d \xC2\xB0""C", deg);
+        snprintf(buf, sizeof(buf), "%d \xC2\xB0""C", shownDeg);
         setText(p.temp, buf);
         lv_obj_set_x(p.temp, 130);
         snprintf(buf, sizeof(buf), "%.1f bar", v.pressure);
         setText(p.bar, buf);
         hide(p.bar, false);
     } else {
-        snprintf(buf, sizeof(buf), "%d \xC2\xB0""C", deg);
+        snprintf(buf, sizeof(buf), "%d \xC2\xB0""C", shownDeg);
         setText(p.temp, buf);
         lv_obj_set_x(p.temp, 180); // centred when it stands alone
         hide(p.bar, true);
