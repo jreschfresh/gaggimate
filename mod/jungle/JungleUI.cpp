@@ -785,17 +785,21 @@ void JungleUI::update(const JungleView &v) {
     }
 
     char buf[32];
-    const int shownDeg = v.mode == JM_BREW ? static_cast<int>(lroundf(v.temp)) : deg; // brew: round at .5
+    // brew: one decimal place, so the real value is visible; the other screens show full degrees
+    char tbuf[24];
+    if (v.mode == JM_BREW) {
+        snprintf(tbuf, sizeof(tbuf), "%.1f \xC2\xB0""C", v.temp);
+    } else {
+        snprintf(tbuf, sizeof(tbuf), "%d \xC2\xB0""C", deg);
+    }
     if (v.pressureAvailable && v.mode != JM_STEAM) {
-        snprintf(buf, sizeof(buf), "%d \xC2\xB0""C", shownDeg);
-        setText(p.temp, buf);
+        setText(p.temp, tbuf);
         lv_obj_set_x(p.temp, 130);
         snprintf(buf, sizeof(buf), "%.1f bar", v.pressure);
         setText(p.bar, buf);
         hide(p.bar, false);
     } else {
-        snprintf(buf, sizeof(buf), "%d \xC2\xB0""C", shownDeg);
-        setText(p.temp, buf);
+        setText(p.temp, tbuf);
         lv_obj_set_x(p.temp, 180); // centred when it stands alone
         hide(p.bar, true);
     }
@@ -833,6 +837,18 @@ void JungleUI::update(const JungleView &v) {
 
     if (p.start != nullptr) {
         hide(p.start, v.hold);
+        // Brew: until the temperature is stable, the button is an empty ring with a white symbol.
+        const int rs = (v.mode == JM_BREW && !v.ready && !v.active) ? 1 : 0;
+        if (rs != p.readyState) {
+            p.readyState = rs;
+            const Theme &bt = THEMES[v.mode];
+            lv_obj_set_style_bg_opa(p.start, rs ? LV_OPA_TRANSP : LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_border_width(p.start, rs ? 4 : 0, LV_PART_MAIN);
+            lv_obj_set_style_border_color(p.start, col(bt.button), LV_PART_MAIN);
+            lv_obj_set_style_border_opa(p.start, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_text_color(p.play, col(rs ? bt.button : bt.glyph), LV_PART_MAIN);
+            lv_obj_invalidate(p.start);
+        }
         if (v.active) {
             hide(p.play, true);
             hide(p.stop, false);

@@ -31,6 +31,7 @@ struct JungleView {
     bool cool = false;       // steam screen: cool-down mode (water through the steam wand) is on
     float coolStart = 0.0f;  // temperature when the cool-down was switched on
     float coolTarget = 0.0f; // brew temperature the cool-down aims for
+    bool ready = true;       // brew screen: temperature held within +-0.5 C for 1 min (start button is drawn as an empty ring until then)
 };
 
 class JungleUI {
@@ -75,6 +76,7 @@ class JungleUI {
         lv_obj_t *preset[2] = {nullptr, nullptr}; // water screen: 25 / 80 degree buttons
         lv_obj_t *presetLabel[2] = {nullptr, nullptr};
         int coolState = -1;
+        int readyState = -1;
         int presetState = -1;
         bool steamReached = false; // steam screen: the target temperature was reached once -> pressure view
         int steamBarMode = -1;

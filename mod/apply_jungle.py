@@ -220,6 +220,24 @@ void DefaultUI::updateJungle() {
         if (v.showWeight && brewProcess.profile_target_weight() > 0.0f) {
             v.shotFrac = v.weight / brewProcess.profile_target_weight();
         }
+        {
+            // Ready = brew temperature held within +-0.5 C for 1 minute (restarts when it leaves the band or the screen was away).
+            static unsigned long readySince = 0, readyLast = 0;
+            const unsigned long nowMs = ::millis();
+            if (nowMs - readyLast > 6000UL) {
+                readySince = 0;
+            }
+            readyLast = nowMs;
+            const float dev = v.temp > v.fillTarget ? v.temp - v.fillTarget : v.fillTarget - v.temp;
+            if (dev <= 0.5f && controller->getMode() == MODE_BREW) {
+                if (readySince == 0) {
+                    readySince = nowMs;
+                }
+            } else {
+                readySince = 0;
+            }
+            v.ready = readySince != 0 && nowMs - readySince >= 60000UL;
+        }
         break;
     case JM_WATER:
         v.fillTarget = controller->getTargetTemp();
