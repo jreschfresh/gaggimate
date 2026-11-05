@@ -295,8 +295,27 @@ if os.path.exists(ctl):
             t = t.replace(old, new, 1)
             done.append(label)
 
+    ctl_sub("void Controller::loopLogic() {\n",
+            "// [MOD] windup guard: the integral term piles up during a long warm-up and keeps the heater on far past the target.\n"
+            "// Below (target - 6 C) the integral is switched off (changing the gains resets it on the controller board).\n"
+            "bool g_pidIntegralOff = false;\n\nvoid Controller::loopLogic() {\n", "windup flag")
+    ctl_sub("    // Check if steam is ready\n",
+            "    { // [MOD] windup guard\n"
+            "        bool off = g_pidIntegralOff;\n"
+            "        if (mode != MODE_BREW || isActive() || currentTemp >= getTargetTemp() - 6.f) {\n"
+            "            off = false;\n"
+            "        } else if (currentTemp > 5.f) {\n"
+            "            off = true;\n"
+            "        }\n"
+            "        if (off != g_pidIntegralOff) {\n"
+            "            g_pidIntegralOff = off;\n"
+            "            setPidSettings();\n"
+            "        }\n"
+            "    }\n"
+            "    // Check if steam is ready\n", "windup guard")
     ctl_sub("    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n",
             "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n"
+            "    if (g_pidIntegralOff && mode == MODE_BREW) {\n        pid[1] = 0.0f; // [MOD] windup guard: no integral while far below the brew target\n    }\n"
             "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n", "steam Kp")
     if "[MOD] auto flush" not in t:
         a1 = "void Controller::loopLogic() {\n"
