@@ -342,7 +342,7 @@ static int g_flushOverrideS = 0;
             t = t.replace(a4, """    if (g_autoFlushArmed) { // [MOD] auto flush
         if (mode != MODE_BREW || isActive()) {
             g_autoFlushArmed = false;
-        } else if (currentTemp > 30.f && currentTemp + 1.f >= getTargetTemp()) {
+        } else if (currentTemp > 30.f && currentTemp + 10.f >= getTargetTemp()) {
             g_autoFlushArmed = false;
             g_flushOverrideS = 3;
             onFlush();
