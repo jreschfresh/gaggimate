@@ -298,12 +298,12 @@ if os.path.exists(ctl):
     ctl_sub("void Controller::loopLogic() {\n",
             "// [MOD] windup guard: the integral term piles up during a long warm-up and keeps the heater on far past the target.\n"
             "// Below (target - 12 C) the integral is switched off (changing the gains resets it on the controller board).\n"
-            "float g_pidKiScale = 2.0f;\n\nvoid Controller::loopLogic() {\n", "windup flag")
+            "float g_pidKiScale = 4.0f;\n\nvoid Controller::loopLogic() {\n", "windup flag")
     ctl_sub("    // Check if steam is ready\n",
             "    { // [MOD] windup guard\n"
             "        float scale = g_pidKiScale;\n"
             "        if (mode != MODE_BREW || isActive() || currentTemp >= getTargetTemp() - 12.f) {\n"
-            "            scale = 2.0f;\n"
+            "            scale = 4.0f;\n"
             "        } else if (currentTemp > 5.f) {\n"
             "            scale = 0.0f;\n"
             "        }\n"
@@ -315,7 +315,7 @@ if os.path.exists(ctl):
             "    // Check if steam is ready\n", "windup guard")
     ctl_sub("    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n",
             "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n"
-            "    if (mode == MODE_BREW) {\n        pid[1] *= g_pidKiScale; // [MOD] windup guard: no integral far below the brew target, twice as strong close to it\n    }\n"
+            "    if (mode == MODE_BREW) {\n        pid[0] *= 4.0f; // [MOD] brew: stronger P (fast, steady approach), weaker D (less braking), I off far below the target\n        pid[2] *= 0.5f;\n        pid[1] *= g_pidKiScale;\n    }\n"
             "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n", "steam Kp")
     if "[MOD] auto flush" not in t:
         a1 = "void Controller::loopLogic() {\n"
