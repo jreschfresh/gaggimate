@@ -339,7 +339,7 @@ if os.path.exists(ctl):
     # still on its way (from the reported heater power) and lowers the boiler setpoint a little so the PID backs off in time.
     ctl_sub('const String LOG_TAG = F("Controller");\n',
             'const String LOG_TAG = F("Controller");\n'
-            "// [MOD] heat governor (values fitted on logged heat-ups: delay 10 s, lag 33 s, gain 0.444 C/s at full power)\n"
+            "// [MOD] heat governor (values fitted on logged heat-ups: delay 10 s, lag 33 s, net gain ~0.4-0.5 C per full-power second incl. losses; fitted on 3 logged heat-ups)\n"
             "static float g_govDrop = 0.f;\n"
             "static float g_govU[10] = {0};\n"
             "static int g_govIdx = 0;\n"
@@ -359,12 +359,12 @@ if os.path.exists(ctl):
             "    for (int i = 0; i < 10; i++) {\n"
             "        buffered += g_govU[i];\n"
             "    }\n"
-            "    float pending = 0.444f * (buffered + g_govF * 33.f);\n"
-            "    float loss = 0.102f * (temp - 20.f) / 75.f * 10.f;\n"
+            "    float pending = 0.5f * (buffered + g_govF * 33.f);\n"
+            "    float loss = 1.2f * (temp - 20.f) / 75.f;\n"
             "    float predicted = temp + pending - loss;\n"
             "    float drop = 0.f;\n"
             "    if (enabled && target > 0.f && temp > 30.f) {\n"
-            "        drop = 8.f * std::max(0.f, predicted - (target - 0.3f));\n"
+            "        drop = 8.f * std::max(0.f, predicted - (target - 0.4f));\n"
             "    }\n"
             "    drop = std::min(drop, 12.f);\n"
             "    g_govDrop = std::round(drop * 10.f) / 10.f;\n"
