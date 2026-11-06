@@ -320,7 +320,7 @@ if os.path.exists(ctl):
     ctl_sub("    // Check if steam is ready\n",
             "    { // [MOD] windup guard\n"
             "        float scale = g_pidKiScale;\n"
-            "        if (mode != MODE_BREW || isActive() || currentTemp >= getTargetTemp() - 12.f) {\n"
+            "        if (mode != MODE_BREW || isActive() || currentTemp >= getTargetTemp() - 1.5f) {\n"
             "            scale = 2.0f;\n"
             "        } else if (currentTemp > 5.f) {\n"
             "            scale = 0.0f;\n"
