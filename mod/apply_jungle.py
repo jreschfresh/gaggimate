@@ -335,6 +335,47 @@ if os.path.exists(ctl):
             "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n"
             "    if (mode == MODE_BREW) {\n        pid[0] *= 3.0f; // [MOD] brew: stronger P and stronger D (anticipates the ~25 s sensor lag), I off far below the target\n        pid[2] *= 2.3f;\n        pid[1] *= g_pidKiScale;\n    }\n"
             "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n", "steam Kp")
+    # [MOD] heat governor: the boiler needs ~10 s + ~33 s lag until heat shows at the sensor. The display estimates the heat
+    # still on its way (from the reported heater power) and lowers the boiler setpoint a little so the PID backs off in time.
+    ctl_sub('const String LOG_TAG = F("Controller");\n',
+            'const String LOG_TAG = F("Controller");\n'
+            "// [MOD] heat governor (values fitted on logged heat-ups: delay 10 s, lag 33 s, gain 0.444 C/s at full power)\n"
+            "static float g_govDrop = 0.f;\n"
+            "static float g_govU[10] = {0};\n"
+            "static int g_govIdx = 0;\n"
+            "static float g_govF = 0.f;\n"
+            "static unsigned long g_govLast = 0;\n"
+            "static void govUpdate(float hpPercent, float temp, float target, bool enabled) {\n"
+            "    unsigned long now = millis();\n"
+            "    if (now - g_govLast < 1000UL) {\n"
+            "        return;\n"
+            "    }\n"
+            "    g_govLast = now;\n"
+            "    float delayed = g_govU[g_govIdx];\n"
+            "    g_govU[g_govIdx] = std::max(0.f, std::min(1.f, hpPercent / 100.f));\n"
+            "    g_govIdx = (g_govIdx + 1) % 10;\n"
+            "    g_govF += (delayed - g_govF) / 33.f;\n"
+            "    float buffered = 0.f;\n"
+            "    for (int i = 0; i < 10; i++) {\n"
+            "        buffered += g_govU[i];\n"
+            "    }\n"
+            "    float pending = 0.444f * (buffered + g_govF * 33.f);\n"
+            "    float loss = 0.102f * (temp - 20.f) / 75.f * 10.f;\n"
+            "    float predicted = temp + pending - loss;\n"
+            "    float drop = 0.f;\n"
+            "    if (enabled && target > 0.f && temp > 30.f) {\n"
+            "        drop = 8.f * std::max(0.f, predicted - (target - 0.3f));\n"
+            "    }\n"
+            "    drop = std::min(drop, 12.f);\n"
+            "    g_govDrop = std::round(drop * 10.f) / 10.f;\n"
+            "}\n", "governor helper")
+    ctl_sub("        this->currentHeaterPower = heaterPower;\n",
+            "        this->currentHeaterPower = heaterPower;\n        govUpdate(heaterPower, currentTemp, getTargetTemp(), mode == MODE_BREW); // [MOD] heat governor\n",
+            "governor update")
+    ctl_sub("    bool altRelayActive = false;\n    if (active && proc->isAltRelayActive()) {",
+            "    if (!active && mode == MODE_BREW && targetTemp > .0f && g_govDrop > 0.f) {\n"
+            "        targetTemp -= g_govDrop; // [MOD] heat governor\n    }\n\n"
+            "    bool altRelayActive = false;\n    if (active && proc->isAltRelayActive()) {", "governor apply")
     if "[MOD] auto flush" not in t:
         a1 = "void Controller::loopLogic() {\n"
         a2 = "    steamReady = false;\n\n    updateLastAction();\n"
