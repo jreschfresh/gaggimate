@@ -333,7 +333,7 @@ if os.path.exists(ctl):
             "    // Check if steam is ready\n", "windup guard")
     ctl_sub("    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n",
             "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n"
-            "    if (mode == MODE_BREW) {\n        pid[0] *= 3.0f; // [MOD] brew: stronger P and stronger D (anticipates the ~25 s sensor lag), I off far below the target\n        pid[2] *= 2.3f;\n        pid[1] *= g_pidKiScale;\n    }\n"
+            "    if (mode == MODE_BREW) {\n        pid[0] *= 5.4f; // [MOD] brew: stronger P and stronger D (anticipates the ~25 s sensor lag), I off far below the target\n        pid[2] *= 6.25f;\n        pid[1] *= g_pidKiScale;\n    }\n"
             "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n", "steam Kp")
     if "[MOD] auto flush" not in t:
         a1 = "void Controller::loopLogic() {\n"
