@@ -316,7 +316,7 @@ if os.path.exists(ctl):
     ctl_sub("void Controller::loopLogic() {\n",
             "// [MOD] windup guard: the integral term piles up during a long warm-up and keeps the heater on far past the target.\n"
             "// Below (target - 12 C) the integral is switched off (changing the gains resets it on the controller board).\n"
-            "float g_pidKiScale = 2.0f;\n\nvoid Controller::loopLogic() {\n", "windup flag")
+            "float g_pidKiScale = 2.0f;\nfloat g_pidKdScale = 2.3f;\n\nvoid Controller::loopLogic() {\n", "windup flag")
     ctl_sub("    // Check if steam is ready\n",
             "    { // [MOD] windup guard\n"
             "        float scale = g_pidKiScale;\n"
@@ -325,15 +325,18 @@ if os.path.exists(ctl):
             "        } else if (currentTemp > 5.f) {\n"
             "            scale = 0.0f;\n"
             "        }\n"
-            "        if (scale != g_pidKiScale) {\n"
+            "        // [MOD] near the target the strong D term turns sensor steps into heat pulses that hold the boiler ~1 C too high\n"
+            "        float kd = (mode == MODE_BREW && !isActive() && currentTemp >= getTargetTemp() - 1.5f) ? 0.3f : 2.3f;\n"
+            "        if (scale != g_pidKiScale || kd != g_pidKdScale) {\n"
             "            g_pidKiScale = scale;\n"
+            "            g_pidKdScale = kd;\n"
             "            setPidSettings();\n"
             "        }\n"
             "    }\n"
             "    // Check if steam is ready\n", "windup guard")
     ctl_sub("    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n",
             "    if (mode == MODE_STEAM) {\n        pid[0] *= 2.5f; // [MOD] steam Kp boost: last degrees heat up faster, overshoot matters little here\n    }\n"
-            "    if (mode == MODE_BREW) {\n        pid[0] *= 3.0f; // [MOD] brew: stronger P and stronger D (anticipates the ~25 s sensor lag), I off far below the target\n        pid[2] *= 2.3f;\n        pid[1] *= g_pidKiScale;\n    }\n"
+            "    if (mode == MODE_BREW) {\n        pid[0] *= 3.0f; // [MOD] brew: stronger P and stronger D (anticipates the ~25 s sensor lag), I off far below the target\n        pid[2] *= g_pidKdScale;\n        pid[1] *= g_pidKiScale;\n    }\n"
             "    comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);\n", "steam Kp")
     # [MOD] heat governor: the boiler needs ~10 s + ~33 s lag until heat shows at the sensor. The display estimates the heat
     # still on its way (from the reported heater power) and lowers the boiler setpoint a little so the PID backs off in time.

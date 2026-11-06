@@ -143,7 +143,8 @@ void FlightLogPlugin::loop() {
     float ct = controller->getCurrentTemp();
     float tt = controller->getTargetTemp();
     bool hot = mode != 0 && (active || fabsf(ct - tt) > 2.0f); // heating up / process running: 1 Hz
-    unsigned long interval = mode == 0 ? 30000UL : 1000UL; // 1 Hz whenever the machine is awake (needed to see short heater pulses)
+    unsigned long interval = mode == 0 ? 30000UL : 1000UL; // 1 Hz whenever the machine is awake
+    if (mode == 1 && fabsf(ct - tt) <= 2.0f) interval = 250UL; // 4 Hz (the controller board's own rate) near the target: short heater pulses
     if (mode != lastMode) {
         lastMode = mode;
         lastSample = 0; // sample immediately on a mode change
