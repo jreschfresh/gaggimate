@@ -6,6 +6,9 @@
 #include <display/core/PluginManager.h>
 #include <esp_system.h>
 #include <time.h>
+#include <algorithm>
+
+float govDropNow(); // defined in Controller.cpp (heat governor)
 
 FlightLogPlugin FlightLog;
 
@@ -140,7 +143,7 @@ void FlightLogPlugin::loop() {
     float ct = controller->getCurrentTemp();
     float tt = controller->getTargetTemp();
     bool hot = mode != 0 && (active || fabsf(ct - tt) > 2.0f); // heating up / process running: 1 Hz
-    unsigned long interval = mode == 0 ? 30000UL : (hot ? 1000UL : 5000UL);
+    unsigned long interval = mode == 0 ? 30000UL : 1000UL; // 1 Hz whenever the machine is awake (needed to see short heater pulses)
     if (mode != lastMode) {
         lastMode = mode;
         lastSample = 0; // sample immediately on a mode change
@@ -152,6 +155,7 @@ void FlightLogPlugin::loop() {
         r.ms = now;
         r.type = 0;
         r.mode = mode;
+        r.rsv = (uint8_t)std::min(250.f, govDropNow() * 10.f);
         r.flags = (active ? 1 : 0) | (controller->isBrewActive() ? 2 : 0) | (scale ? 4 : 0) | (wifi ? 8 : 0) | (controller->isReady() ? 16 : 0);
         r.ct = q(ct, 100);
         r.tt = q(tt, 100);

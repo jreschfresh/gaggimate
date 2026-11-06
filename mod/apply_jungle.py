@@ -388,14 +388,12 @@ if os.path.exists(ctl):
             "    }\n"
             "    drop = std::min(drop, 12.f);\n"
             "    g_govDrop = std::round(drop * 10.f) / 10.f;\n"
-            "}\n", "governor helper")
+            "}\n"
+            "float govDropNow() { return g_govDrop; }\n", "governor helper")
     ctl_sub("        this->currentHeaterPower = heaterPower;\n",
             "        this->currentHeaterPower = heaterPower;\n        govUpdate(heaterPower, currentTemp, getTargetTemp(), mode == MODE_BREW); // [MOD] heat governor\n",
             "governor update")
     ctl_sub("    bool altRelayActive = false;\n    if (active && proc->isAltRelayActive()) {",
-            "    if (mode == MODE_BREW && targetTemp > .0f) {\n"
-            "        targetTemp -= 1.0f; // [MOD] the boiler settles ~1 C above its setpoint (measured on 6 heat-ups), so aim 1 C lower, the profile stays unchanged\n"
-            "    }\n"
             "    if (!active && mode == MODE_BREW && targetTemp > .0f && g_govDrop > 0.f) {\n"
             "        targetTemp -= g_govDrop; // [MOD] heat governor\n    }\n\n"
             "    bool altRelayActive = false;\n    if (active && proc->isAltRelayActive()) {", "governor apply")
