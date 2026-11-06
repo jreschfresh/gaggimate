@@ -389,3 +389,28 @@ if sc is not None:
 if ctl_txt is not None:
     open(ctl, "w").write(ctl_txt)
 print("Jungle look applied.")
+
+# ---- Flight log (optional, never fatal): black box on the machine, see mod/flightlog/FlightLog.cpp
+try:
+    fl_src = os.path.join(mod, "flightlog")
+    pdir = os.path.join(repo, "src/display/plugins")
+    ctl_p = os.path.join(repo, "src/display/core/Controller.cpp")
+    web_p = os.path.join(pdir, "WebUIPlugin.cpp")
+    ct = open(ctl_p).read()
+    wt = open(web_p).read()
+    a_reg = "    pluginManager->registerPlugin(&ShotHistory);\n"
+    a_route = '    server.on("/api/scales/list",'
+    if os.path.isdir(fl_src) and a_reg in ct and a_route in wt and "FlightLog" not in ct:
+        for f in ("FlightLog.h", "FlightLog.cpp"):
+            shutil.copy(os.path.join(fl_src, f), pdir)
+        ct = ct.replace(a_reg, a_reg + "    pluginManager->registerPlugin(&FlightLog); // [MOD] flight log\n", 1)
+        ct = ct.replace("#include", "#include <display/plugins/FlightLog.h>\n#include", 1)
+        wt = wt.replace(a_route, "    FlightLog.registerRoutes(server); // [MOD] flight log\n" + a_route, 1)
+        wt = wt.replace("#include", "#include <display/plugins/FlightLog.h>\n#include", 1)
+        open(ctl_p, "w").write(ct)
+        open(web_p, "w").write(wt)
+        print("Flight log applied.")
+    else:
+        print("Flight log skipped (anchors missing or already applied).")
+except Exception as e:
+    print("Flight log skipped: %s" % e)
