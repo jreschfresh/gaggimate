@@ -67,6 +67,10 @@ class JungleUI {
         lv_obj_t *play = nullptr;
         lv_obj_t *stop = nullptr;
         lv_obj_t *flush = nullptr;
+        lv_obj_t *multi = nullptr;      // brew screen: two cups (several brews planned)
+        lv_obj_t *multiGlyph = nullptr;
+        lv_obj_t *multiLabel = nullptr; // count of finished brews
+        int multiState = -1;
         lv_obj_t *confirm = nullptr;
         lv_obj_t *confirmLabel = nullptr;
         lv_obj_t *stripes[SHOT_STEPS] = {nullptr}; // brew screen: coffee-coloured steps, one per 1/20 of the shot
