@@ -214,6 +214,15 @@ void DefaultUI::updateJungle() {
         v.showWeight = controller->isVolumetricAvailable();
         v.weight = static_cast<float>(activeWeight);
         v.hold = brewEndPending;
+        {
+            // [MOD] The scale can be zeroed or the cup lifted right after the shot: the result stays on screen.
+            static float shotWeight = 0.0f;
+            if (v.active) {
+                shotWeight = v.weight;
+            } else if (v.hold && v.weight < shotWeight - 1.5f) {
+                v.weight = shotWeight;
+            }
+        }
         v.shot = v.active;
         v.shotFrac = brewProcess.elapsed_percentage() / 100.0f;
         strlcpy(v.timeText, brewProcess.elapsed_time(), sizeof(v.timeText));
@@ -574,3 +583,37 @@ void jungle_standby_attach(lv_obj_t *parent) {
         print("Standby animation skipped (anchor missing or already applied).")
 except Exception as e:
     print("Standby animation skipped: %s" % e)
+
+# ---- Shot history: final weight (optional, never fatal) ------------------------------------------------------------------
+# The stored final weight was read at the very end of the recording. A scale that zeroes itself after the shot (Bookoo in
+# auto mode, about 1 s after the timer stop) or a cup that is lifted early turned every shot into "0 g". Now the last
+# believable weight of the shot is stored: a sudden jump of more than 5 g (tare, cup lifted, jug put down) ends the series.
+try:
+    sh_p = os.path.join(repo, "src/display/plugins/ShotHistoryPlugin.cpp")
+    sh = open(sh_p).read()
+    a1 = "        lastBluetoothWeight = btWeight;\n"
+    a2 = "        float finalWeight = currentBluetoothWeight;\n"
+    a3 = "    lastBluetoothWeight = 0.0f;\n    currentProfileName ="
+    a4 = "uint16_t encodeUnsigned(float value, float scale, uint16_t maxValue) {"
+    a5 = "            const float weightDiff = abs(currentBluetoothWeight - lastStableWeight);\n"
+    if all(sh.count(a) == 1 for a in (a1, a2, a3, a4, a5)):
+        sh = sh.replace(a4, "// [MOD] last believable scale weight of the running shot (see mod/apply_jungle.py)\n"
+                            "static float g_shotValidWeight = 0.0f;\nstatic bool g_shotWeightValid = true;\n\n" + a4, 1)
+        sh = sh.replace(a1, a1 +
+                        "        // [MOD] follow the weight only while it moves believably\n"
+                        "        g_shotWeightValid = fabsf(btWeight - g_shotValidWeight) <= MAX_PLAUSIBLE_WEIGHT_DELTA;\n"
+                        "        if (g_shotWeightValid) {\n"
+                        "            g_shotValidWeight = btWeight;\n"
+                        "        }\n", 1)
+        sh = sh.replace(a2, "        float finalWeight = g_shotValidWeight; // [MOD] not the reading after a tare / lifted cup\n", 1)
+        sh = sh.replace(a3, "    lastBluetoothWeight = 0.0f;\n    g_shotValidWeight = 0.0f; // [MOD]\n    g_shotWeightValid = true;\n    currentProfileName =", 1)
+        sh = sh.replace(a5, "            if (!g_shotWeightValid) {\n"
+                            "                extendedRecording = false; // [MOD] scale zeroed or cup gone: nothing more to measure\n"
+                            "                return;\n"
+                            "            }\n" + a5, 1)
+        open(sh_p, "w").write(sh)
+        print("Final weight fix applied.")
+    else:
+        print("Final weight fix skipped (anchors changed).")
+except Exception as e:
+    print("Final weight fix skipped: %s" % e)
