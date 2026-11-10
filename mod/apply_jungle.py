@@ -560,7 +560,8 @@ void jungle_standby_attach(lv_obj_t *parent) {
         # sprites are created after the picture object is complete (next sibling = drawn right above the picture)
         end = st.index("}", anchor.end())
         st = st[:end + 1] + "\n        jungle_standby_attach(parent_obj); // [MOD] moving hands" + st[end + 1:]
-        st = st.replace("#include", "void jungle_standby_attach(lv_obj_t *parent);\n#include", 1)
+        fn = "void create_screen_standby_screen()"
+        st = st.replace(fn, "void jungle_standby_attach(lv_obj_t *parent); // [MOD] moving hands\n" + fn, 1)
         open(scr_p, "w").write(st)
         open(img_p, "w").write(bg_c)
         open(os.path.join(dst, "standby_anim.c"), "w").write(an)
