@@ -3,11 +3,17 @@
 #include <cstdio>
 #include <cstring>
 #include <display/ui/default/eez/actions.h>
+#include <src/draw/sw/lv_draw_sw_blend.h>
 
 LV_FONT_DECLARE(jungle_font_104)
 LV_FONT_DECLARE(jungle_font_80)
 LV_FONT_DECLARE(jungle_font_22)
 LV_FONT_DECLARE(pj_font_24)
+LV_FONT_DECLARE(pj_font_16)
+LV_IMG_DECLARE(jungle_icon_drop)
+LV_IMG_DECLARE(jungle_icon_cup)
+LV_IMG_DECLARE(jungle_icon_x)
+LV_IMG_DECLARE(jungle_icon_check)
 
 namespace {
 
@@ -32,9 +38,6 @@ const Theme THEMES[JM_COUNT] = {
 
 // Screen order for swiping, left to right.
 const int ORDER[JM_COUNT] = {JM_WATER, JM_BREW, JM_STEAM, JM_GRIND};
-
-LV_IMG_DECLARE(jungle_icon_drop);
-LV_IMG_DECLARE(jungle_icon_cup);
 
 JungleUI *g_ui = nullptr;
 bool g_active[JM_COUNT] = {false};
@@ -121,6 +124,50 @@ void playGlyphDraw(lv_event_t *e) {
     roundedTriangle(ctx, lv_obj_get_style_text_color(o, LV_PART_MAIN), p, 14);
 }
 
+// Vertical gradient from the style's bg_color (top) to bg_grad_color (bottom), drawn row by row with a fine ordered
+// dither. The 16-bit display has only 32 / 64 steps per colour channel; without the dither a long gradient shows as
+// bands with visible edges. The dither only ever moves a pixel by one colour step, so no grain is visible.
+void gradDraw(lv_event_t *e) {
+    static const uint8_t bayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+    static lv_color_t line[SIZE];
+    lv_obj_t *o = lv_event_get_target(e);
+    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    lv_area_t clip;
+    if (!_lv_area_intersect(&clip, &a, ctx->clip_area)) {
+        return;
+    }
+    const lv_color32_t c0 = {.full = lv_color_to32(lv_obj_get_style_bg_color(o, LV_PART_MAIN))};
+    const lv_color32_t c1 = {.full = lv_color_to32(lv_obj_get_style_bg_grad_color(o, LV_PART_MAIN))};
+    const float h = static_cast<float>(lv_area_get_height(&a) - 1);
+    const int w = lv_area_get_width(&clip) > SIZE ? SIZE : lv_area_get_width(&clip);
+    lv_draw_sw_blend_dsc_t b;
+    lv_memset_00(&b, sizeof(b));
+    b.src_buf = line;
+    b.opa = LV_OPA_COVER;
+    b.blend_mode = LV_BLEND_MODE_NORMAL;
+    b.mask_res = LV_DRAW_MASK_RES_FULL_COVER;
+    for (int y = clip.y1; y <= clip.y2; y++) {
+        const float t = h > 0.0f ? static_cast<float>(y - a.y1) / h : 0.0f;
+        const float r = (c0.ch.red + (c1.ch.red - c0.ch.red) * t) * (31.0f / 255.0f);
+        const float g = (c0.ch.green + (c1.ch.green - c0.ch.green) * t) * (63.0f / 255.0f);
+        const float bl = (c0.ch.blue + (c1.ch.blue - c0.ch.blue) * t) * (31.0f / 255.0f);
+        lv_color_t px[4];
+        for (int k = 0; k < 4; k++) {
+            const float th = (bayer[y & 3][k] + 0.5f) / 16.0f;
+            const int r5 = static_cast<int>(r + th), g6 = static_cast<int>(g + th), b5 = static_cast<int>(bl + th);
+            px[k] = lv_color_make((r5 > 31 ? 31 : r5) << 3, (g6 > 63 ? 63 : g6) << 2, (b5 > 31 ? 31 : b5) << 3);
+        }
+        for (int x = 0; x < w; x++) {
+            line[x] = px[(clip.x1 + x) & 3];
+        }
+        lv_area_t row = {clip.x1, static_cast<lv_coord_t>(y), static_cast<lv_coord_t>(clip.x1 + w - 1), static_cast<lv_coord_t>(y)};
+        b.blend_area = &row;
+        lv_draw_sw_blend(ctx, &b);
+    }
+}
+
 void mkBar(lv_obj_t *parent, int x, int y, int w, int h, uint32_t color) {
     lv_obj_t *b = plain(parent);
     lv_obj_set_size(b, w, h);
@@ -142,14 +189,38 @@ lv_obj_t *roundButton(lv_obj_t *parent, int x, int y, uint32_t color, bool plus)
     lv_obj_set_style_border_width(b, 2, LV_PART_MAIN);
     lv_obj_set_style_border_color(b, col(color), LV_PART_MAIN);
     lv_obj_set_style_bg_color(b, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(b, LV_OPA_30, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(b, LV_OPA_60, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(b, LV_OPA_30, LV_PART_MAIN | LV_STATE_PRESSED);
     lv_obj_set_ext_click_area(b, 15);
     const int c = SMALL_BTN / 2;
     mkBar(b, c - 10 - 2, c - 1 - 2, 20, 3, color);
     if (plus) {
         mkBar(b, c - 1 - 2, c - 10 - 2, 3, 20, color);
     }
+    return b;
+}
+
+// Round outlined button with an icon (cross / check mark on the question overlay).
+lv_obj_t *iconButton(lv_obj_t *parent, int x, int y, uint32_t color, const lv_img_dsc_t *icon) {
+    lv_obj_t *b = lv_obj_create(parent);
+    lv_obj_remove_style_all(b);
+    lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(b, SMALL_BTN + 8, SMALL_BTN + 8);
+    lv_obj_set_pos(b, x, y);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(b, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(b, col(color), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(b, col(color), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(b, LV_OPA_30, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_ext_click_area(b, 15);
+    lv_obj_t *i = lv_img_create(b);
+    lv_img_set_src(i, icon);
+    lv_obj_clear_flag(i, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_img_recolor(i, col(color), LV_PART_MAIN);
+    lv_obj_set_style_img_recolor_opa(i, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_center(i);
     return b;
 }
 
@@ -391,17 +462,22 @@ void JungleUI::build(int mode) {
     lv_obj_set_style_bg_color(p.grad, col(t.top), LV_PART_MAIN);
     lv_obj_set_style_bg_grad_color(p.grad, col(t.bottom), LV_PART_MAIN);
     lv_obj_set_style_bg_grad_dir(p.grad, LV_GRAD_DIR_VER, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(p.grad, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(p.grad, LV_OPA_TRANSP, LV_PART_MAIN); // drawn by gradDraw (the style only holds the two colours)
+    lv_obj_add_event_cb(p.grad, gradDraw, LV_EVENT_DRAW_MAIN, nullptr);
     setFill(p, SIZE);
 
     if (mode == JM_BREW) {
         const int h = SIZE / SHOT_STEPS;
         for (int i = 0; i < SHOT_STEPS; i++) {
             lv_obj_t *st = plain(p.scr);
-            lv_obj_set_size(st, SIZE, h + 1);
+            lv_obj_set_size(st, SIZE, h);
             lv_obj_set_pos(st, 0, SIZE - (i + 1) * h);
-            lv_obj_set_style_bg_color(st, col(coffeeColor(i)), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(st, LV_OPA_COVER, LV_PART_MAIN);
+            // Each step fades into the next one, so the finished shot is one smooth run of colours without edges.
+            lv_obj_set_style_bg_color(st, col(coffeeColor(i + 1 < SHOT_STEPS ? i + 1 : i)), LV_PART_MAIN);
+            lv_obj_set_style_bg_grad_color(st, col(coffeeColor(i)), LV_PART_MAIN);
+            lv_obj_set_style_bg_grad_dir(st, LV_GRAD_DIR_VER, LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(st, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_add_event_cb(st, gradDraw, LV_EVENT_DRAW_MAIN, nullptr);
             lv_obj_add_flag(st, LV_OBJ_FLAG_HIDDEN);
             p.stripes[i] = st;
         }
@@ -437,7 +513,7 @@ void JungleUI::build(int mode) {
             lv_obj_set_style_border_width(b, 2, LV_PART_MAIN);
             lv_obj_set_style_border_color(b, col(t.text), LV_PART_MAIN);
             lv_obj_set_style_bg_color(b, lv_color_black(), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(b, LV_OPA_30, LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, LV_PART_MAIN);
             lv_obj_set_ext_click_area(b, 12);
             lv_obj_add_event_cb(b, presetCb, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(i == 0 ? 25 : 80)));
             lv_obj_t *lb = label(b, &jungle_font_22, t.text);
@@ -559,14 +635,14 @@ void JungleUI::build(int mode) {
         lv_obj_set_size(p.confirm, SIZE, SIZE);
         lv_obj_add_flag(p.confirm, LV_OBJ_FLAG_CLICKABLE); // swallows touches behind it
         lv_obj_set_style_bg_color(p.confirm, lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(p.confirm, LV_OPA_90, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(p.confirm, 242, LV_PART_MAIN); // nearly opaque: the buttons behind it must not shine through
         p.confirmLabel = label(p.confirm, &pj_font_24, 0xFFEEDE);
         lv_obj_set_size(p.confirmLabel, 320, LV_SIZE_CONTENT);
         lv_label_set_long_mode(p.confirmLabel, LV_LABEL_LONG_WRAP);
         lv_obj_set_pos(p.confirmLabel, 80, 120);
         const int ids[2] = {0, 1};
         for (int i : ids) {
-            lv_obj_t *b = roundButton(p.confirm, i == 0 ? 130 : 294, 330, 0xFFEEDE, i == 1);
+            lv_obj_t *b = iconButton(p.confirm, i == 0 ? 126 : 290, 322, 0xFFEEDE, i == 0 ? &jungle_icon_x : &jungle_icon_check);
             lv_obj_add_event_cb(b, i == 0 ? confirmBackCb : confirmOkCb, LV_EVENT_CLICKED, nullptr);
         }
         lv_obj_add_flag(p.confirm, LV_OBJ_FLAG_HIDDEN);
@@ -797,8 +873,14 @@ void JungleUI::update(const JungleView &v) {
             lv_obj_set_style_bg_grad_color(p.grad, col(bottom), LV_PART_MAIN);
             for (int i = 0; i < 2; i++) {
                 lv_obj_set_style_bg_color(p.preset[i], i == sel ? col(t.text) : lv_color_black(), LV_PART_MAIN);
-                lv_obj_set_style_bg_opa(p.preset[i], i == sel ? LV_OPA_COVER : LV_OPA_30, LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(p.preset[i], i == sel ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
                 lv_obj_set_style_text_color(p.presetLabel[i], col(i == sel ? bottom : t.text), LV_PART_MAIN);
+            }
+            // the symbol on the start button takes the colour of the screen (blue for cold water, green for tea)
+            if (p.play != nullptr && p.stop != nullptr) {
+                lv_obj_set_style_text_color(p.play, col(bottom), LV_PART_MAIN);
+                lv_obj_set_style_bg_color(p.stop, col(bottom), LV_PART_MAIN);
+                lv_obj_invalidate(p.start);
             }
         }
     }
@@ -865,7 +947,8 @@ void JungleUI::update(const JungleView &v) {
             lv_obj_set_style_border_width(p.start, rs ? 4 : 0, LV_PART_MAIN);
             lv_obj_set_style_border_color(p.start, col(bt.button), LV_PART_MAIN);
             lv_obj_set_style_border_opa(p.start, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_text_color(p.play, col(rs ? bt.button : bt.glyph), LV_PART_MAIN);
+            const uint32_t glyph = (v.mode == JM_WATER && v.fillTarget >= 60.0f) ? 0x2E7D32 : bt.glyph; // tea is green
+            lv_obj_set_style_text_color(p.play, col(rs ? bt.button : glyph), LV_PART_MAIN);
             lv_obj_invalidate(p.start);
         }
         if (v.active) {
