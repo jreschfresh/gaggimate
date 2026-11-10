@@ -33,11 +33,12 @@ const Theme THEMES[JM_COUNT] = {
 // Screen order for swiping, left to right.
 const int ORDER[JM_COUNT] = {JM_WATER, JM_BREW, JM_STEAM, JM_GRIND};
 
+LV_IMG_DECLARE(jungle_icon_drop);
+LV_IMG_DECLARE(jungle_icon_cup);
+
 JungleUI *g_ui = nullptr;
 bool g_active[JM_COUNT] = {false};
-bool g_multi = false;          // brew screen: several cups are planned before steaming
-int g_cups = 0;                // finished brews while g_multi is on
-bool g_prevBrewActive = false; // to detect the end of a brew
+int g_cups = 1; // brew screen: number of cups planned before steaming (1 = a single brew, pressing the cups button counts up)
 
 lv_color_t col(uint32_t c) { return lv_color_hex(c); }
 
@@ -114,66 +115,10 @@ void playGlyphDraw(lv_event_t *e) {
     lv_area_t a;
     lv_obj_get_coords(o, &a);
     // Triangle in a 48 x 48 box, pointing right, with soft corners.
-    lv_point_t p[3] = {{(lv_coord_t)(a.x1 + 15), (lv_coord_t)(a.y1 + 9)},
-                       {(lv_coord_t)(a.x1 + 38), (lv_coord_t)(a.y1 + 24)},
-                       {(lv_coord_t)(a.x1 + 15), (lv_coord_t)(a.y1 + 39)}};
-    roundedTriangle(ctx, lv_obj_get_style_text_color(o, LV_PART_MAIN), p, 8);
-}
-
-// Water drop (flush button): a circle with a point on top.
-void dropDraw(lv_event_t *e) {
-    lv_obj_t *o = lv_event_get_target(e);
-    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
-    lv_area_t a;
-    lv_obj_get_coords(o, &a);
-    const int cx = (a.x1 + a.x2) / 2;
-    const int cy = (a.y1 + a.y2) / 2;
-    lv_draw_rect_dsc_t d;
-    lv_draw_rect_dsc_init(&d);
-    d.bg_color = lv_obj_get_style_text_color(o, LV_PART_MAIN);
-    d.bg_opa = LV_OPA_COVER;
-    d.border_width = 0;
-    d.radius = LV_RADIUS_CIRCLE;
-    lv_area_t c = {(lv_coord_t)(cx - 8), (lv_coord_t)(cy - 3), (lv_coord_t)(cx + 8), (lv_coord_t)(cy + 13)};
-    lv_draw_rect(ctx, &d, &c);
-    lv_point_t p[3] = {{(lv_coord_t)cx, (lv_coord_t)(cy - 12)}, {(lv_coord_t)(cx + 7), (lv_coord_t)(cy + 2)},
-                       {(lv_coord_t)(cx - 7), (lv_coord_t)(cy + 2)}};
-    roundedTriangle(ctx, lv_obj_get_style_text_color(o, LV_PART_MAIN), p, 4);
-}
-
-// Two cups side by side (multi-brew button).
-void cupsDraw(lv_event_t *e) {
-    lv_obj_t *o = lv_event_get_target(e);
-    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
-    lv_area_t a;
-    lv_obj_get_coords(o, &a);
-    const int cx = (a.x1 + a.x2) / 2;
-    const int cy = (a.y1 + a.y2) / 2;
-    lv_color_t c = lv_obj_get_style_text_color(o, LV_PART_MAIN);
-    lv_draw_rect_dsc_t body;
-    lv_draw_rect_dsc_init(&body);
-    body.bg_color = c;
-    body.bg_opa = LV_OPA_COVER;
-    body.border_width = 0;
-    body.radius = 4;
-    lv_draw_rect_dsc_t handle;
-    lv_draw_rect_dsc_init(&handle);
-    handle.bg_opa = LV_OPA_TRANSP;
-    handle.border_color = c;
-    handle.border_opa = LV_OPA_COVER;
-    handle.border_width = 2;
-    handle.radius = 3;
-    const int xs[2] = {cx - 18, cx + 3};
-    for (int i = 0; i < 2; i++) {
-        lv_area_t cup = {(lv_coord_t)xs[i], (lv_coord_t)(cy - 6), (lv_coord_t)(xs[i] + 13), (lv_coord_t)(cy + 7)};
-        lv_draw_rect(ctx, &body, &cup);
-        lv_area_t h = {(lv_coord_t)(xs[i] + 11), (lv_coord_t)(cy - 3), (lv_coord_t)(xs[i] + 17), (lv_coord_t)(cy + 3)};
-        lv_draw_rect(ctx, &handle, &h);
-    }
-    lv_draw_rect_dsc_t saucer = body;
-    saucer.radius = 1;
-    lv_area_t s = {(lv_coord_t)(cx - 20), (lv_coord_t)(cy + 10), (lv_coord_t)(cx + 20), (lv_coord_t)(cy + 11)};
-    lv_draw_rect(ctx, &saucer, &s);
+    lv_point_t p[3] = {{(lv_coord_t)(a.x1 + 18), (lv_coord_t)(a.y1 + 13)},
+                       {(lv_coord_t)(a.x1 + 34), (lv_coord_t)(a.y1 + 24)},
+                       {(lv_coord_t)(a.x1 + 18), (lv_coord_t)(a.y1 + 35)}};
+    roundedTriangle(ctx, lv_obj_get_style_text_color(o, LV_PART_MAIN), p, 14);
 }
 
 void mkBar(lv_obj_t *parent, int x, int y, int w, int h, uint32_t color) {
@@ -331,8 +276,7 @@ void flushCb(lv_event_t *e) {
 void multiCb(lv_event_t *e) {
     (void)e;
     if (!g_active[JM_BREW]) {
-        g_multi = !g_multi;
-        g_cups = 0;
+        g_cups = g_cups % 6 + 1; // 1 -> 2 -> ... -> 6 -> 1
     }
 }
 
@@ -578,11 +522,12 @@ void JungleUI::build(int mode) {
         lv_obj_set_style_bg_opa(p.flush, LV_OPA_60, LV_PART_MAIN | LV_STATE_PRESSED);
         lv_obj_set_ext_click_area(p.flush, 15);
         lv_obj_add_event_cb(p.flush, flushCb, LV_EVENT_PRESSED, nullptr);
-        lv_obj_t *drop = plain(p.flush);
-        lv_obj_set_size(drop, SMALL_BTN, SMALL_BTN);
-        lv_obj_center(drop);
-        lv_obj_set_style_text_color(drop, col(t.text), LV_PART_MAIN);
-        lv_obj_add_event_cb(drop, dropDraw, LV_EVENT_DRAW_MAIN_END, nullptr);
+        lv_obj_t *drop = lv_img_create(p.flush);
+        lv_img_set_src(drop, &jungle_icon_drop);
+        lv_obj_clear_flag(drop, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_img_recolor(drop, col(t.text), LV_PART_MAIN);
+        lv_obj_set_style_img_recolor_opa(drop, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_align(drop, LV_ALIGN_CENTER, 0, -1);
 
         // Multi-brew (two cups) on the other side of the start button, with a counter of finished brews.
         p.multi = lv_obj_create(p.scr);
@@ -599,14 +544,15 @@ void JungleUI::build(int mode) {
         lv_obj_set_style_bg_opa(p.multi, LV_OPA_30, LV_PART_MAIN | LV_STATE_PRESSED);
         lv_obj_set_ext_click_area(p.multi, 15);
         lv_obj_add_event_cb(p.multi, multiCb, LV_EVENT_PRESSED, nullptr);
-        p.multiGlyph = plain(p.multi);
-        lv_obj_set_size(p.multiGlyph, SMALL_BTN, SMALL_BTN);
-        lv_obj_center(p.multiGlyph);
-        lv_obj_set_style_text_color(p.multiGlyph, col(t.text), LV_PART_MAIN);
-        lv_obj_add_event_cb(p.multiGlyph, cupsDraw, LV_EVENT_DRAW_MAIN_END, nullptr);
-        p.multiLabel = label(p.scr, &jungle_font_22, t.text);
-        lv_obj_set_pos(p.multiLabel, SIZE - 88 - 6, 340);
-        lv_obj_add_flag(p.multiLabel, LV_OBJ_FLAG_HIDDEN);
+        p.multiGlyph = lv_img_create(p.multi);
+        lv_img_set_src(p.multiGlyph, &jungle_icon_cup);
+        lv_obj_clear_flag(p.multiGlyph, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_img_recolor(p.multiGlyph, col(t.text), LV_PART_MAIN);
+        lv_obj_set_style_img_recolor_opa(p.multiGlyph, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_align(p.multiGlyph, LV_ALIGN_LEFT_MID, 5, 0); // cup + number together sit centred in the circle
+        p.multiLabel = label(p.multi, &pj_font_16, t.text);
+        centerLabel(p.multiLabel, 41, SMALL_BTN / 2 - 4, 14); // inside the button, right of the cup, level with the bowl
+        lv_label_set_text(p.multiLabel, "1");
 
         // Warning confirmation (the controller asks before it starts a brew with an error-level warning).
         p.confirm = plain(p.scr);
@@ -742,8 +688,7 @@ void JungleUI::update(const JungleView &v) {
     grindAvailable = v.grindAvailable;
     g_active[v.mode] = v.active || v.hold;
     if (v.mode == JM_STEAM) {
-        g_multi = false; // the planned brews are over once steaming starts
-        g_cups = 0;
+        g_cups = 1; // the planned brews are over once steaming starts
     }
     Page &p = pages[v.mode];
 
@@ -939,26 +884,19 @@ void JungleUI::update(const JungleView &v) {
         }
     }
     if (p.multi != nullptr) {
-        if (g_multi && g_prevBrewActive && !v.active) {
-            g_cups++;
-        }
-        g_prevBrewActive = v.active;
         hide(p.multi, v.active || v.hold);
-        const int ms = g_multi ? 1 : 0;
+        const int ms = g_cups;
         if (ms != p.multiState) {
             p.multiState = ms;
             const Theme &mt = THEMES[JM_BREW];
-            lv_obj_set_style_bg_opa(p.multi, ms ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
-            lv_obj_set_style_border_width(p.multi, ms ? 0 : 2, LV_PART_MAIN);
-            lv_obj_set_style_text_color(p.multiGlyph, col(ms ? mt.glyph : mt.text), LV_PART_MAIN);
+            const bool on = ms > 1;
+            lv_obj_set_style_bg_opa(p.multi, on ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_img_recolor(p.multiGlyph, col(on ? mt.glyph : mt.text), LV_PART_MAIN);
+            lv_obj_set_style_text_color(p.multiLabel, col(on ? mt.glyph : mt.text), LV_PART_MAIN);
+            char nb[8];
+            snprintf(nb, sizeof(nb), "%d", ms);
+            setText(p.multiLabel, nb);
             lv_obj_invalidate(p.multi);
-        }
-        if (g_multi && g_cups > 0 && !v.active && !v.hold) {
-            snprintf(buf, sizeof(buf), "%d", g_cups);
-            setText(p.multiLabel, buf);
-            hide(p.multiLabel, false);
-        } else {
-            hide(p.multiLabel, true);
         }
     }
     if (p.confirm != nullptr) {
