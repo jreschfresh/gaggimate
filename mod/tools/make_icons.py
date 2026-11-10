@@ -80,7 +80,26 @@ def strokes(lines, w=24, h=24, width=3.2):
     return finish(img, w, h, 0)
 
 
+def wisp():
+    # soft S-shaped wisp of steam, thicker at the bottom
+    import math
+    w, h = 30, 72
+    img = Image.new("L", (w * SS, h * SS), 0)
+    d = ImageDraw.Draw(img)
+    for i in range(400):
+        u = i / 399.0
+        y = 66 - u * 60
+        x = w / 2 + 6.0 * math.sin(u * 2 * math.pi * 1.05) * (0.45 + 0.55 * u)
+        r = 3.1 - 1.9 * u
+        d.ellipse([(x - r) * SS, (y - r) * SS, (x + r) * SS, (y + r) * SS], fill=255)
+    a = gaussian_filter(np.asarray(img, dtype=np.float32) / 255.0, 1.6 * SS)
+    a = a.reshape(h, SS, w, SS).mean(axis=(1, 3))
+    fade = np.clip(np.minimum(np.arange(h) / 14.0, (h - 1 - np.arange(h)) / 10.0), 0, 1)[:, None]  # soft ends
+    return (np.clip(a * fade * 1.15, 0, 1) * 255 + 0.5).astype(np.uint8)
+
+
 ICONS = {
+    "jungle_icon_wisp": wisp(),
     "jungle_icon_drop": drop(),
     "jungle_icon_cup": cup(),
     "jungle_icon_x": strokes([((5.5, 5.5), (18.5, 18.5)), ((18.5, 5.5), (5.5, 18.5))]),
