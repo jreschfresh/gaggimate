@@ -14,7 +14,6 @@ LV_IMG_DECLARE(jungle_icon_drop)
 LV_IMG_DECLARE(jungle_icon_cup)
 LV_IMG_DECLARE(jungle_icon_x)
 LV_IMG_DECLARE(jungle_icon_check)
-LV_IMG_DECLARE(jungle_icon_wisp)
 
 namespace {
 
@@ -42,7 +41,6 @@ const int ORDER[JM_COUNT] = {JM_WATER, JM_BREW, JM_STEAM, JM_GRIND};
 
 JungleUI *g_ui = nullptr;
 bool g_active[JM_COUNT] = {false};
-int g_fx = 0; // optional animations (JungleUI::setEffects)
 int g_cups = 1; // brew screen: number of cups planned before steaming (1 = a single brew, pressing the cups button counts up)
 
 lv_color_t col(uint32_t c) { return lv_color_hex(c); }
@@ -142,14 +140,21 @@ void ditherRow(lv_draw_ctx_t *ctx, int y, int x1, int w, float r8, float g8, flo
     lv_draw_sw_blend(ctx, &b);
 }
 
-// Vertical gradient from the style's bg_color (top) to bg_grad_color (bottom), drawn row by row.
+// Background fill: a vertical gradient over the whole object, from the style's bg_color (top) to bg_grad_color
+// (bottom). The colours stay where they are; only the lowest rows are drawn, up to the height in the user data.
 void gradDraw(lv_event_t *e) {
     lv_obj_t *o = lv_event_get_target(e);
     lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+    const int height = static_cast<int>(reinterpret_cast<intptr_t>(lv_obj_get_user_data(o)));
+    if (height <= 0) {
+        return;
+    }
     lv_area_t a;
     lv_obj_get_coords(o, &a);
+    lv_area_t vis = a;
+    vis.y1 = static_cast<lv_coord_t>(a.y2 - height + 1);
     lv_area_t clip;
-    if (!_lv_area_intersect(&clip, &a, ctx->clip_area)) {
+    if (!_lv_area_intersect(&clip, &vis, ctx->clip_area)) {
         return;
     }
     const lv_color32_t c0 = {.full = lv_color_to32(lv_obj_get_style_bg_color(o, LV_PART_MAIN))};
@@ -187,14 +192,6 @@ void coffeeDraw(lv_event_t *e) {
         ditherRow(ctx, y, clip.x1, lv_area_get_width(&clip), c0[0] + (c1[0] - c0[0]) * u, c0[1] + (c1[1] - c0[1]) * u,
                   c0[2] + (c1[2] - c0[2]) * u);
     }
-}
-
-// Steam wisp: rises by 56 pixels while it fades in and out again (v runs from 0 to 1000).
-void wispAnimCb(void *obj, int32_t v) {
-    lv_obj_t *o = static_cast<lv_obj_t *>(obj);
-    lv_obj_set_style_translate_y(o, static_cast<lv_coord_t>(-v * 56 / 1000), LV_PART_MAIN);
-    const int opa = v < 300 ? v * 150 / 300 : (1000 - v) * 150 / 700;
-    lv_obj_set_style_img_opa(o, static_cast<lv_opa_t>(opa), LV_PART_MAIN);
 }
 
 void mkBar(lv_obj_t *parent, int x, int y, int w, int h, uint32_t color) {
@@ -481,13 +478,10 @@ void JungleUI::build(int mode) {
     lv_obj_add_event_cb(p.scr, loadedCb, LV_EVENT_SCREEN_LOAD_START, nullptr);
     lv_obj_add_event_cb(p.scr, loadedCb, LV_EVENT_SCREEN_LOADED, nullptr);
 
-    // Background: a clipping box at the bottom, with the full-size gradient inside it, so the colours
-    // stay where they are and only more of them is uncovered.
-    p.clip = plain(p.scr);
-    lv_obj_set_size(p.clip, SIZE, SIZE);
-    lv_obj_set_pos(p.clip, 0, 0);
-    p.grad = plain(p.clip);
+    // Background: the full-size gradient; gradDraw uncovers it from the bottom up to the fill height.
+    p.grad = plain(p.scr);
     lv_obj_set_size(p.grad, SIZE, SIZE);
+    lv_obj_set_pos(p.grad, 0, 0);
     lv_obj_set_style_bg_color(p.grad, col(t.top), LV_PART_MAIN);
     lv_obj_set_style_bg_grad_color(p.grad, col(t.bottom), LV_PART_MAIN);
     lv_obj_set_style_bg_grad_dir(p.grad, LV_GRAD_DIR_VER, LV_PART_MAIN);
@@ -501,34 +495,6 @@ void JungleUI::build(int mode) {
         lv_obj_set_pos(p.coffee, 0, 0);
         lv_obj_add_event_cb(p.coffee, coffeeDraw, LV_EVENT_DRAW_MAIN, nullptr);
     }
-    if (mode == JM_STEAM) {
-        // Three wisps that rise from the surface of the fill (only shown with the steam effect switched on).
-        p.wisps = plain(p.scr);
-        lv_obj_set_size(p.wisps, SIZE, 130);
-        lv_obj_add_flag(p.wisps, LV_OBJ_FLAG_HIDDEN);
-        const int xs[3] = {150, 240, 322};
-        const int delay[3] = {0, 1150, 2050};
-        for (int i = 0; i < 3; i++) {
-            lv_obj_t *w = lv_img_create(p.wisps);
-            lv_img_set_src(w, &jungle_icon_wisp);
-            lv_obj_clear_flag(w, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_set_style_img_recolor(w, col(0xFFD3E4), LV_PART_MAIN);
-            lv_obj_set_style_img_recolor_opa(w, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_img_opa(w, LV_OPA_TRANSP, LV_PART_MAIN);
-            lv_obj_set_pos(w, xs[i] - 15, 130 - 72);
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, w);
-            lv_anim_set_exec_cb(&a, wispAnimCb);
-            lv_anim_set_values(&a, 0, 1000);
-            lv_anim_set_time(&a, 3000);
-            lv_anim_set_delay(&a, delay[i]);
-            lv_anim_set_repeat_delay(&a, 500);
-            lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-            lv_anim_start(&a);
-        }
-    }
-
     // Top row: temperature (and pressure).
     p.temp = label(p.scr, &jungle_font_22, t.text);
     p.bar = label(p.scr, &jungle_font_22, t.text);
@@ -705,18 +671,14 @@ void JungleUI::setFill(Page &p, int height) {
     if (height == p.fillHeight) {
         return;
     }
+    // only the rows between the old and the new height are redrawn
+    const int old = p.fillHeight < 0 ? 0 : p.fillHeight;
+    const int lo = height < old ? height : old, hi = height < old ? old : height;
     p.fillHeight = height;
-    if (height == 0) {
-        lv_obj_add_flag(p.clip, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-    lv_obj_clear_flag(p.clip, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_size(p.clip, SIZE, height);
-    lv_obj_set_pos(p.clip, 0, SIZE - height);
-    lv_obj_set_pos(p.grad, 0, height - SIZE);
+    lv_obj_set_user_data(p.grad, reinterpret_cast<void *>(static_cast<intptr_t>(height)));
+    lv_area_t a = {0, static_cast<lv_coord_t>(SIZE - hi), SIZE - 1, static_cast<lv_coord_t>(SIZE - lo - 1)};
+    lv_obj_invalidate_area(p.grad, &a);
 }
-
-void JungleUI::setEffects(int fx) { g_fx = fx; }
 
 // Coffee height in pixels. Only the rows between the old and the new height are redrawn.
 void JungleUI::setCoffee(Page &p, int height) {
@@ -763,8 +725,13 @@ void JungleUI::setFillAnimated(Page &p, int height) {
     if (height == p.fillTargetH) {
         return;
     }
+    const bool first = p.fillTargetH < 0; // first value after the start: no glide
     p.fillTargetH = height;
     lv_anim_del(&p, fillAnimCb);
+    if (first) {
+        setFill(p, height);
+        return;
+    }
     const int from = p.fillHeight < 0 ? height : p.fillHeight;
     if (from == height) {
         return;
@@ -774,8 +741,9 @@ void JungleUI::setFillAnimated(Page &p, int height) {
     lv_anim_set_var(&a, &p);
     lv_anim_set_exec_cb(&a, fillAnimCb);
     lv_anim_set_values(&a, from, height);
-    lv_anim_set_time(&a, 350);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    const int dist = from < height ? height - from : from - height;
+    lv_anim_set_time(&a, dist > 40 ? 450 : 300);
+    lv_anim_set_path_cb(&a, dist > 40 ? lv_anim_path_ease_out : lv_anim_path_linear);
     lv_anim_start(&a);
 }
 
@@ -846,17 +814,18 @@ void JungleUI::update(const JungleView &v) {
     }
     Page &p = pages[v.mode];
 
-    // Background fill: one step per degree.
+    // Background fill: flows with the temperature. It is complete from half a degree below the target on, so the
+    // normal small swing around the target does not show as a moving edge at the top.
     float frac = 1.0f;
     const int deg = static_cast<int>(floorf(v.temp));
+    const float fullAt = v.fillTarget - 0.5f;
     if (v.mode == JM_STEAM) {
-        const float lo = 50.0f; // everything below only shows the first step
-        const float steps = v.fillTarget - lo + 1.0f;
-        if (steps > 1.0f) {
-            frac = fmaxf(static_cast<float>(deg) - lo + 1.0f, 1.0f) / steps;
+        const float lo = 50.0f; // everything below only shows a first sliver
+        if (fullAt > lo + 1.0f) {
+            frac = fmaxf((v.temp - lo) / (fullAt - lo), 0.02f);
         }
-    } else if (v.mode != JM_GRIND && v.fillTarget > 0.0f) {
-        frac = static_cast<float>(deg) / v.fillTarget;
+    } else if (v.mode != JM_GRIND && fullAt > 1.0f) {
+        frac = v.temp / fullAt;
     }
     if (frac > 1.0f) {
         frac = 1.0f;
@@ -877,7 +846,6 @@ void JungleUI::update(const JungleView &v) {
         f = fminf(fmaxf(f, 0.04f), 1.0f);
         fillH = static_cast<int>(lroundf(f * SIZE));
         setFillAnimated(p, fillH);
-        hide(p.wisps, true);
     } else if (v.mode == JM_STEAM) {
         // First the steam boiler heats up (the fill follows the temperature). Once the target was reached, the
         // screen switches to the pressure view: the big number and the fill follow the bar value.
@@ -897,16 +865,8 @@ void JungleUI::update(const JungleView &v) {
             p.steamBarMode = steamBar ? 1 : 0;
         }
         setFillAnimated(p, fillH);
-        if (p.wisps != nullptr) {
-            // steam rises from the surface while there is pressure and enough room above it
-            const bool on = (g_fx & 4) && steamBar && v.pressure > 0.3f && p.fillHeight > 0 && p.fillHeight < SIZE - 110;
-            hide(p.wisps, !on);
-            if (on) {
-                lv_obj_set_pos(p.wisps, 0, SIZE - p.fillHeight - 130 + 10);
-            }
-        }
     } else {
-        setFill(p, fillH);
+        setFillAnimated(p, fillH);
     }
 
     if (v.mode == JM_BREW) {
@@ -914,15 +874,15 @@ void JungleUI::update(const JungleView &v) {
         if (shotShown) {
             steps = static_cast<int>(floorf(fminf(fmaxf(v.shotFrac, 0.0f), 1.0f) * SHOT_STEPS + 0.001f));
         }
-        // Height of the coffee colours: in 20 steps, or (effect 2) flowing with the shot.
-        int target = steps * (SIZE / SHOT_STEPS);
-        if ((g_fx & 2) && shotShown) {
+        // Height of the coffee colours: flows with the progress of the shot.
+        int target = 0;
+        if (shotShown) {
             target = static_cast<int>(lroundf(fminf(fmaxf(v.shotFrac, 0.0f), 1.0f) * SIZE));
         }
         if (target != p.coffeeTargetH) {
             p.coffeeTargetH = target;
             lv_anim_del(&p, coffeeAnimCb);
-            if ((g_fx & 2) && shotShown && target > p.coffeeH) {
+            if (shotShown && target > p.coffeeH) {
                 lv_anim_t a;
                 lv_anim_init(&a);
                 lv_anim_set_var(&a, &p);
@@ -1044,7 +1004,7 @@ void JungleUI::update(const JungleView &v) {
         // Brew: until the temperature is stable, the button is an empty ring with a white symbol.
         const int rs = (v.mode == JM_BREW && !v.ready && !v.active) ? 1 : 0;
         if (rs != p.readyState) {
-            const bool soft = (g_fx & 1) && v.mode == JM_BREW && p.readyState == 1 && rs == 0; // just became ready
+            const bool soft = v.mode == JM_BREW && p.readyState == 1 && rs == 0; // just became ready: the button fills softly
             p.readyState = rs;
             const Theme &bt = THEMES[v.mode];
             lv_obj_set_style_border_color(p.start, col(bt.button), LV_PART_MAIN);

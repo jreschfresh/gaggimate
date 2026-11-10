@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
     v = JungleView(); v.mode = JM_GRIND; v.grindAvailable = true; strcpy(v.centerText, "18.0"); v.showCenter = true; v.temp = 95; shot("grind");
     // Brew confirm
     v = JungleView(); v.mode = JM_BREW; v.temp = 95; v.fillTarget = 95; v.pressureAvailable = true; v.confirmVisible = true; strcpy(v.confirmText, "Waage nicht verbunden. Trotzdem starten?"); shot("brew_confirm");
-    if (argc > 2) { // effect previews: frames every 50 ms, the UI is updated every 250 ms like on the machine
+    if (argc > 2) { // motion previews: frames every 50 ms, the UI is updated every 250 ms like on the machine
         char nm[48];
         int n = 0;
         auto seq = [&](const char *tag, int ms, auto step) {
@@ -67,28 +67,25 @@ int main(int argc, char **argv) {
                 dump(nm);
             }
         };
-        // 1) start button fills when the temperature is stable
-        ui.setEffects(7);
-        v = JungleView(); v.mode = JM_BREW; v.temp = 94.8f; v.fillTarget = 95; v.pressureAvailable = true; v.ready = false;
+        // heating up (time lapse: 3 degrees per second), then the start button fills when the temperature is stable
+        v = JungleView(); v.mode = JM_BREW; v.temp = 70.0f; v.fillTarget = 95; v.pressureAvailable = true; v.ready = false;
         ui.show(v.mode); run(700); ui.update(v); run(300);
-        seq("fxready", 3000, [&](int t) { v.ready = t >= 750; v.temp = 95.0f; });
-        // 2) coffee colours: steps (as now) and flowing
-        for (int k = 0; k < 2; k++) {
-            ui.setEffects(k ? 2 : 0);
-            v = JungleView(); v.mode = JM_BREW; v.temp = 95.0f; v.fillTarget = 95; v.pressureAvailable = true; v.ready = true; v.showWeight = true;
-            ui.update(v); run(300);
-            seq(k ? "fxcoffeeB" : "fxcoffeeA", 9000, [&](int t) {
-                const float f = t / 8500.0f > 1.0f ? 1.0f : t / 8500.0f;
-                v.active = true; v.shot = true; v.shotFrac = f; v.weight = 36.0f * f; v.pressure = 8.8f;
-                snprintf(v.timeText, sizeof(v.timeText), "%d s", (int)(f * 27));
-            });
-            v.active = false; v.shot = false; v.hold = false; ui.update(v); run(300);
-        }
-        // 3) steam wisps
-        ui.setEffects(7);
-        v = JungleView(); v.mode = JM_STEAM; v.temp = 109; v.fillTarget = 109; v.pressureAvailable = true; v.pressure = 1.3f; strcpy(v.centerText, "1.3");
-        ui.show(v.mode); run(700); ui.update(v); run(900); ui.update(v); run(2000);
-        seq("fxsteam", 7000, [&](int t) { v.pressure = 1.3f; });
+        seq("heat", 11000, [&](int t) { v.temp = 70.0f + t * 0.003f; if (v.temp > 95.0f) v.temp = 95.0f; v.ready = t >= 9500; });
+        // shot
+        v.showWeight = true; ui.update(v); run(300);
+        seq("shot", 9000, [&](int t) {
+            const float f = t / 8500.0f > 1.0f ? 1.0f : t / 8500.0f;
+            v.active = true; v.shot = true; v.shotFrac = f; v.weight = 36.0f * f; v.pressure = 8.8f;
+            snprintf(v.timeText, sizeof(v.timeText), "%d s", (int)(f * 27));
+        });
+        // steam: heating, then the pressure view
+        v = JungleView(); v.mode = JM_STEAM; v.temp = 95; v.fillTarget = 111; v.pressureAvailable = true; v.pressure = 0.2f; strcpy(v.centerText, "0.2");
+        ui.show(v.mode); run(700); ui.update(v); run(300);
+        seq("steam", 9000, [&](int t) {
+            v.temp = 95.0f + t * 0.004f; if (v.temp > 111.0f) v.temp = 111.0f;
+            v.pressure = t < 4500 ? 0.2f + t * 0.00025f : 1.3f - (t - 4500) * 0.00012f;
+            snprintf(v.centerText, sizeof(v.centerText), "%.1f", v.pressure);
+        });
         return 0;
     }
     {   // standby: picture + moving hands, one full cycle in 100 ms frames

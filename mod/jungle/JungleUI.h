@@ -52,13 +52,10 @@ class JungleUI {
     void requestStop() { stopRequested = true; }
     bool grindAvailable = false;
     void screenLoaded(); // called by the LVGL load events
-    // Optional animations, bit mask: 1 = start button fills softly when ready, 2 = coffee rises smoothly, 4 = steam wisps.
-    void setEffects(int fx);
 
   private:
     struct Page {
         lv_obj_t *scr = nullptr;
-        lv_obj_t *clip = nullptr;
         lv_obj_t *grad = nullptr;
         lv_obj_t *temp = nullptr;
         lv_obj_t *bar = nullptr;
@@ -78,7 +75,6 @@ class JungleUI {
         lv_obj_t *coffee = nullptr; // brew screen: the coffee colours that rise with the shot (drawn up to coffeeH)
         int coffeeH = 0;
         int coffeeTargetH = -1;
-        lv_obj_t *wisps = nullptr; // steam screen: wisps rising from the surface of the fill
         lv_obj_t *time = nullptr;
         lv_obj_t *snow = nullptr;      // steam screen: snowflake button
         lv_obj_t *snowGlyph = nullptr;
