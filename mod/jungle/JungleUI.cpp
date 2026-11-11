@@ -507,7 +507,7 @@ void JungleUI::build(int mode) {
     centerLabel(p.center, SIZE / 2, mode == JM_BREW || mode == JM_STEAM ? 202 : 200, 300);
     if (mode == JM_BREW) {
         p.time = label(p.scr, &jungle_font_22, t.text);
-        centerLabel(p.time, SIZE / 2, 284, 120);
+        centerLabel(p.time, SIZE / 2, 284, 300);
         lv_obj_add_flag(p.time, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(p.center, LV_OBJ_FLAG_CLICKABLE); // long press tares the scale
         lv_obj_add_event_cb(p.center, tareCb, LV_EVENT_LONG_PRESSED, nullptr);
@@ -543,6 +543,9 @@ void JungleUI::build(int mode) {
     }
 
     if (mode == JM_STEAM) { // snowflake: cool down through the steam wand
+        p.result = label(p.scr, &jungle_font_22, t.text); // true time and amount of the shot before
+        centerLabel(p.result, SIZE / 2, 284, 300);
+        lv_obj_add_flag(p.result, LV_OBJ_FLAG_HIDDEN);
         p.snow = lv_obj_create(p.scr);
         lv_obj_remove_style_all(p.snow);
         lv_obj_clear_flag(p.snow, LV_OBJ_FLAG_SCROLLABLE);
@@ -975,6 +978,9 @@ void JungleUI::update(const JungleView &v) {
             if (shotShown && v.timeText[0] != 0) {
                 setText(p.time, v.timeText);
                 hide(p.time, false);
+            } else if (!shotShown && v.resultText[0] != 0) { // idle: the last shot stays readable
+                setText(p.time, v.resultText);
+                hide(p.time, false);
             } else {
                 hide(p.time, true);
             }
@@ -987,6 +993,13 @@ void JungleUI::update(const JungleView &v) {
             hide(p.center, true);
         }
     } else {
+        if (p.result != nullptr) {
+            const bool showResult = v.mode == JM_STEAM && !v.cool && v.resultText[0] != 0;
+            if (showResult) {
+                setText(p.result, v.resultText);
+            }
+            hide(p.result, !showResult);
+        }
         setText(p.center, v.centerText);
         if (v.mode == JM_STEAM && v.cool) {
             snprintf(buf, sizeof(buf), "%d\xC2\xB0", deg);

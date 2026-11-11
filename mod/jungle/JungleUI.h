@@ -27,6 +27,7 @@ struct JungleView {
     bool shot = false;       // brew screen: a shot is running, the coffee colours rise with the progress
     float shotFrac = 0.0f;   // 0..1 progress of the shot (grams / target grams, or time)
     char timeText[12] = ""; // brew screen: elapsed time of the shot
+    char resultText[28] = ""; // brew (idle) and steam screen: true time and amount of the last shot, "" = nothing to show
     bool hold = false;       // the shot just ended: show the final amount for a moment, no buttons
     bool cool = false;       // steam screen: cool-down mode (water through the steam wand) is on
     float coolStart = 0.0f;  // temperature when the cool-down was switched on
@@ -76,6 +77,7 @@ class JungleUI {
         int coffeeH = 0;
         int coffeeTargetH = -1;
         lv_obj_t *time = nullptr;
+        lv_obj_t *result = nullptr; // steam screen: result of the last shot
         lv_obj_t *snow = nullptr;      // steam screen: snowflake button
         lv_obj_t *snowGlyph = nullptr;
         lv_obj_t *preset[2] = {nullptr, nullptr}; // water screen: 25 / 80 degree buttons

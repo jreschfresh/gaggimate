@@ -60,13 +60,20 @@ static unsigned long g_coolPumpAt = 0; // when the 5 s cooling pump run started 
 static bool g_coolPumpDone = false;    // the 5 s pump run is over: only the open steam wand cools now
 static int g_savedWaterTemp = 25;  // water target to restore afterwards
 static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen
+#include <display/ui/default/jungle/TrueOut.h>
+static TrueOut g_out;              // true amount of the running / last shot (drops after the stop included)
+static bool g_shotRunning = false; // a real shot (no flush) is running
+static bool g_shotValid = false;   // g_shotMs / g_shotGrams hold the result of the last shot
+static bool g_shotHasWeight = false;
+static unsigned long g_shotStartMs = 0, g_shotEndMs = 0, g_shotMs = 0, g_shotTickAt = 0;
+static float g_shotGrams = 0.0f;
 """, "cpp:statics")
 # Steam: standby by itself once the milk is steamed and the valve is closed again (optional, never fatal).
 # The recognition lives in jungle/SteamWatch.h and is tested against recorded sessions (mod/tools/steamwatch_test.cpp).
 _sw_anchor = "void DefaultUI::loop() {\n    const unsigned long now = ::millis();\n    const unsigned long diff = now - lastRender;\n"
-if _sw_anchor in c and "static bool g_teaUsed = false;" in c:
-    c = c.replace("static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen\n",
-                  "static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen\n"
+if _sw_anchor in c and "static float g_shotGrams = 0.0f;\n" in c:
+    c = c.replace("static float g_shotGrams = 0.0f;\n",
+                  "static float g_shotGrams = 0.0f;\n"
                   "#include <display/ui/default/jungle/SteamWatch.h>\n"
                   "static SteamWatch g_steamWatch;    // steam mode: recognises \"milk steamed, valve closed again\" from the pressure\n"
                   "static unsigned long g_steamWatchAt = 0;\n", 1)
@@ -85,10 +92,66 @@ if _sw_anchor in c and "static bool g_teaUsed = false;" in c:
             controller->activateStandby();
         }
     }
+
+    // [MOD] True shot time (start incl. pre-infusion .. pump stop) and true amount out (drops after the stop included).
+    // Sampled 20 times a second; a flush is not a shot. The result is shown by updateJungle().
+    if (now - g_shotTickAt >= 50) {
+        g_shotTickAt = now;
+        bool brewing = false;
+        unsigned long started = 0, finished = 0;
+        {
+            std::lock_guard<std::recursive_mutex> guard(controller->getProcessLock());
+            Process *p = controller->getProcess();
+            if (p != nullptr && p->getType() == MODE_BREW && p->isActive()) {
+                auto *bp = static_cast<BrewProcess *>(p);
+                if (!bp->isUtility()) {
+                    brewing = true;
+                    started = bp->processStarted;
+                }
+            } else if (g_shotRunning) {
+                Process *lp = controller->getLastProcess();
+                if (lp != nullptr && lp->getType() == MODE_BREW) {
+                    auto *bp = static_cast<BrewProcess *>(lp);
+                    if (bp->finished > 0 && bp->processStarted == g_shotStartMs) {
+                        finished = bp->finished;
+                    }
+                }
+            }
+        }
+        const bool scale = controller->isVolumetricAvailable();
+        const float w = static_cast<float>(activeWeight);
+        if (brewing) {
+            if (!g_shotRunning || started != g_shotStartMs) {
+                g_shotRunning = true;
+                g_shotValid = false;
+                g_shotStartMs = started;
+                g_shotHasWeight = scale;
+                g_shotGrams = 0.0f;
+                g_out.reset();
+            }
+            g_shotMs = now - started;
+            if (g_shotHasWeight && scale) {
+                g_shotGrams = g_out.feed(w, false);
+            }
+        } else if (g_shotRunning) { // the pump has just stopped (a manual stop leaves `finished` at 0)
+            g_shotRunning = false;
+            g_shotEndMs = finished > 0 ? finished : now;
+            if (finished > 0) {
+                g_shotMs = finished - g_shotStartMs;
+            }
+            g_shotValid = g_shotMs >= 7500; // aborted starts are not shots
+        } else if (g_shotValid) {
+            if (controller->getMode() == MODE_STANDBY) {
+                g_shotValid = false; // the result is gone with the next standby
+            } else if (g_shotHasWeight && scale) {
+                g_shotGrams = g_out.feed(w, true, now - g_shotEndMs);
+            }
+        }
+    }
 """, 1)
-    print("Steam auto-standby applied.")
+    print("Steam auto-standby and shot result applied.")
 else:
-    print("Steam auto-standby NOT applied (anchor missing).")
+    print("Steam auto-standby and shot result NOT applied (anchor missing).")
 c = sub(c, "if (eez_flow_get_current_screen() == SCREEN_ID_STATUS_SCREEN) {",
         "if (activeScreen() == SCREEN_ID_STATUS_SCREEN) {", "cpp:status")
 c = sub(c, "if (eez_flow_get_current_screen() != SCREEN_ID_BREW_SCREEN)",
@@ -242,18 +305,21 @@ void DefaultUI::updateJungle() {
         v.showWeight = controller->isVolumetricAvailable();
         v.weight = static_cast<float>(activeWeight);
         v.hold = brewEndPending;
-        {
-            // [MOD] The scale can be zeroed or the cup lifted right after the shot: the result stays on screen.
-            static float shotWeight = 0.0f;
-            if (v.active) {
-                shotWeight = v.weight;
-            } else if (v.hold && v.weight < shotWeight - 1.5f) {
-                v.weight = shotWeight;
-            }
+        // [MOD] True amount: follows the scale during the shot, afterwards the drops are added and the result stays
+        // when the scale zeroes itself or the cup is lifted (jungle/TrueOut.h, fed in loop()).
+        if (g_shotHasWeight && g_out.started && ((v.active && g_shotRunning) || (v.hold && g_shotValid))) {
+            v.weight = g_shotGrams;
         }
         v.shot = v.active;
         v.shotFrac = brewProcess.elapsed_percentage() / 100.0f;
-        strlcpy(v.timeText, brewProcess.elapsed_time(), sizeof(v.timeText));
+        // [MOD] True shot time: from the start (pre-infusion included) to the pump stop, tenths once it is over
+        if (g_shotRunning) {
+            snprintf(v.timeText, sizeof(v.timeText), "%lu s", g_shotMs / 1000UL);
+        } else if (g_shotValid) {
+            snprintf(v.timeText, sizeof(v.timeText), "%.1f s", static_cast<float>(g_shotMs) / 1000.0f);
+        } else {
+            strlcpy(v.timeText, brewProcess.elapsed_time(), sizeof(v.timeText));
+        }
         if (v.showWeight && brewProcess.profile_target_weight() > 0.0f) {
             v.shotFrac = v.weight / brewProcess.profile_target_weight();
         }
@@ -304,6 +370,15 @@ void DefaultUI::updateJungle() {
         }
         strlcpy(v.centerText, buf, sizeof(v.centerText));
         break;
+    }
+    // [MOD] The last shot stays readable: true time and true amount, on the steam screen and on the idle brew screen
+    v.resultText[0] = 0;
+    if (g_shotValid && !g_shotRunning && (v.mode == JM_STEAM || (v.mode == JM_BREW && !v.active && !v.hold))) {
+        if (g_shotHasWeight && g_out.started) {
+            snprintf(v.resultText, sizeof(v.resultText), "%.1f s    %.1f g", static_cast<float>(g_shotMs) / 1000.0f, g_shotGrams);
+        } else {
+            snprintf(v.resultText, sizeof(v.resultText), "%.1f s", static_cast<float>(g_shotMs) / 1000.0f);
+        }
     }
     v.confirmVisible = brewConfirmVisible && v.mode == JM_BREW;
     if (v.confirmVisible) {
@@ -612,10 +687,11 @@ void jungle_standby_attach(lv_obj_t *parent) {
 except Exception as e:
     print("Standby animation skipped: %s" % e)
 
-# ---- Shot history: final weight (optional, never fatal) ------------------------------------------------------------------
-# The stored final weight was read at the very end of the recording. A scale that zeroes itself after the shot (Bookoo in
-# auto mode, about 1 s after the timer stop) or a cup that is lifted early turned every shot into "0 g". Now the last
-# believable weight of the shot is stored: a sudden jump of more than 5 g (tare, cup lifted, jug put down) ends the series.
+# ---- Shot history: true amount and true shot time (optional, never fatal) ------------------------------------------------
+# The stored final weight was read at the very end of the recording. A scale that zeroes itself after the shot (Bookoo,
+# about 1 s after the timer stop) or a cup that is lifted early turned every shot into "0 g". Now the list stores the
+# true amount (jungle/TrueOut.h: weight before the zeroing plus the drops counted afterwards; a lifted cup ends it) and
+# as duration the true shot time (start .. pump stop) instead of the length of the recording.
 try:
     sh_p = os.path.join(repo, "src/display/plugins/ShotHistoryPlugin.cpp")
     sh = open(sh_p).read()
@@ -624,24 +700,36 @@ try:
     a3 = "    lastBluetoothWeight = 0.0f;\n    currentProfileName ="
     a4 = "uint16_t encodeUnsigned(float value, float scale, uint16_t maxValue) {"
     a5 = "            const float weightDiff = abs(currentBluetoothWeight - lastStableWeight);\n"
-    if all(sh.count(a) == 1 for a in (a1, a2, a3, a4, a5)):
-        sh = sh.replace(a4, "// [MOD] last believable scale weight of the running shot (see mod/apply_jungle.py)\n"
-                            "static float g_shotValidWeight = 0.0f;\nstatic bool g_shotWeightValid = true;\n\n" + a4, 1)
+    a6 = "        header.durationMs = millis() - shotStart;\n"
+    a7 = "            if (now - extendedRecordingStart >= EXTENDED_RECORDING_DURATION) {\n"
+    a8 = "    if (recording && controller && controller->isVolumetricAvailable() && currentBluetoothWeight > 0) {\n"
+    if all(sh.count(a) == 1 for a in (a1, a2, a3, a4, a5, a6, a7, a8)):
+        sh = sh.replace(a4, "// [MOD] true amount and true time of the running shot (see mod/apply_jungle.py)\n"
+                            "#include <display/ui/default/jungle/TrueOut.h>\n"
+                            "static TrueOut g_histOut;\n"
+                            "static bool g_histEnded = false;\n"
+                            "static unsigned long g_histEndAt = 0, g_histBrewMs = 0;\n\n" + a4, 1)
         sh = sh.replace(a1, a1 +
-                        "        // [MOD] follow the weight only while it moves believably\n"
-                        "        g_shotWeightValid = fabsf(btWeight - g_shotValidWeight) <= MAX_PLAUSIBLE_WEIGHT_DELTA;\n"
-                        "        if (g_shotWeightValid) {\n"
-                        "            g_shotValidWeight = btWeight;\n"
-                        "        }\n", 1)
-        sh = sh.replace(a2, "        float finalWeight = g_shotValidWeight; // [MOD] not the reading after a tare / lifted cup\n", 1)
-        sh = sh.replace(a3, "    lastBluetoothWeight = 0.0f;\n    g_shotValidWeight = 0.0f; // [MOD]\n    g_shotWeightValid = true;\n    currentProfileName =", 1)
-        sh = sh.replace(a5, "            if (!g_shotWeightValid) {\n"
-                            "                extendedRecording = false; // [MOD] scale zeroed or cup gone: nothing more to measure\n"
+                        "        // [MOD] every reading goes to the true-amount counter\n"
+                        "        g_histOut.feed(currentBluetoothWeight, g_histEnded, g_histEnded ? millis() - g_histEndAt : 0);\n", 1)
+        sh = sh.replace(a2, "        float finalWeight = g_histOut.total; // [MOD] true amount, not the reading after a tare / lifted cup\n", 1)
+        sh = sh.replace(a3, "    lastBluetoothWeight = 0.0f;\n    g_histOut.reset(); // [MOD]\n    g_histEnded = false;\n    g_histBrewMs = 0;\n    currentProfileName =", 1)
+        sh = sh.replace(a8, "    if (recording && !g_histEnded) { // [MOD] the pump has stopped: this is the true shot time\n"
+                            "        g_histEnded = true;\n"
+                            "        g_histEndAt = millis();\n"
+                            "        g_histBrewMs = g_histEndAt - shotStart;\n"
+                            "    }\n" + a8, 1)
+        sh = sh.replace(a5, "            if (g_histOut.frozen) {\n"
+                            "                extendedRecording = false; // [MOD] cup gone or counting window over: nothing more to measure\n"
                             "                return;\n"
+                            "            }\n"
+                            "            if (g_histOut.base > 0.0f) {\n"
+                            "                return; // [MOD] the scale zeroed itself: keep counting the drops until TrueOut is done\n"
                             "            }\n" + a5, 1)
+        sh = sh.replace(a6, "        header.durationMs = g_histBrewMs > 0 ? g_histBrewMs : millis() - shotStart; // [MOD] true shot time\n", 1)
         open(sh_p, "w").write(sh)
-        print("Final weight fix applied.")
+        print("True amount / shot time for the shot list applied.")
     else:
-        print("Final weight fix skipped (anchors changed).")
+        print("True amount / shot time for the shot list skipped (anchors changed).")
 except Exception as e:
-    print("Final weight fix skipped: %s" % e)
+    print("True amount / shot time for the shot list skipped: %s" % e)

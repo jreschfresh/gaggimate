@@ -43,6 +43,9 @@ int main(int argc, char **argv) {
     v.active = true; v.shot = true; v.shotFrac = 0.45f; v.weight = 16.2f; v.pressure = 8.7f; strcpy(v.timeText, "14 s"); shot("brew_shot_45");
     v.shotFrac = 1.0f; v.weight = 36.1f; strcpy(v.timeText, "27 s"); shot("brew_shot_100");
     v.active = false; v.shot = false; v.hold = true; shot("brew_hold");
+    // true shot time and amount: result right after the shot, later on the idle brew screen and on the steam screen
+    v.shotFrac = 1.0f; v.weight = 20.1f; v.pressure = 8.6f; strcpy(v.timeText, "24.5 s"); shot("brew_result_hold");
+    v.hold = false; v.weight = 0.1f; v.pressure = 1.2f; strcpy(v.resultText, "24.5 s    20.1 g"); shot("brew_result_idle");
     // Water
     v = JungleView(); v.mode = JM_WATER; v.temp = 25; v.fillTarget = 25; v.pressureAvailable = true; v.showCenter = false; shot("water_25");
     v.fillTarget = 80; v.temp = 61; shot("water_80_heating");
@@ -50,6 +53,8 @@ int main(int argc, char **argv) {
     // Steam
     v = JungleView(); v.mode = JM_STEAM; v.temp = 101; v.fillTarget = 111; v.pressureAvailable = true; v.pressure = 0.3f; strcpy(v.centerText, "0.3"); shot("steam_heating");
     v.temp = 111; v.pressure = 1.4f; strcpy(v.centerText, "1.4"); shot("steam_ready");
+    strcpy(v.resultText, "24.5 s    20.1 g"); v.temp = 98; v.pressure = 8.6f; strcpy(v.centerText, "8.6"); shot("steam_result");
+    v.resultText[0] = 0; v.temp = 111; v.pressure = 1.4f; strcpy(v.centerText, "1.4");
     v.cool = true; v.coolStart = 111; v.coolTarget = 95; v.temp = 103; shot("steam_cool");
     // Grind
     v = JungleView(); v.mode = JM_GRIND; v.grindAvailable = true; strcpy(v.centerText, "18.0"); v.showCenter = true; v.temp = 95; shot("grind");
