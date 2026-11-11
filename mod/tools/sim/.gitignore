@@ -1,0 +1,4 @@
+# local simulator files: LVGL checkout (see README.md), build output, rendered frames
+/lvgl/
+/build/
+/out/
