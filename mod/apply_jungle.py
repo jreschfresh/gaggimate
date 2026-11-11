@@ -61,6 +61,34 @@ static bool g_coolPumpDone = false;    // the 5 s pump run is over: only the ope
 static int g_savedWaterTemp = 25;  // water target to restore afterwards
 static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen
 """, "cpp:statics")
+# Steam: standby by itself once the milk is steamed and the valve is closed again (optional, never fatal).
+# The recognition lives in jungle/SteamWatch.h and is tested against recorded sessions (mod/tools/steamwatch_test.cpp).
+_sw_anchor = "void DefaultUI::loop() {\n    const unsigned long now = ::millis();\n    const unsigned long diff = now - lastRender;\n"
+if _sw_anchor in c and "static bool g_teaUsed = false;" in c:
+    c = c.replace("static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen\n",
+                  "static bool g_teaUsed = false;     // water screen: 80 degree preset was chosen\n"
+                  "#include <display/ui/default/jungle/SteamWatch.h>\n"
+                  "static SteamWatch g_steamWatch;    // steam mode: recognises \"milk steamed, valve closed again\" from the pressure\n"
+                  "static unsigned long g_steamWatchAt = 0;\n", 1)
+    c = c.replace(_sw_anchor, _sw_anchor + """
+    // [MOD] Steam: one pressure sample per second goes to SteamWatch; 5 s after the valve is closed again the machine
+    // goes to standby. A short purge before steaming is ignored. Not during the cool-down through the wand.
+    if (controller->getMode() != MODE_STEAM || g_coolMode || !pressureAvailable) {
+        if (g_steamWatch.t != 0) {
+            g_steamWatch.reset();
+        }
+        g_steamWatchAt = now;
+    } else if (now - g_steamWatchAt >= 1000) {
+        g_steamWatchAt = now;
+        if (g_steamWatch.feed(controller->getCurrentPressure())) {
+            g_steamWatch.reset();
+            controller->activateStandby();
+        }
+    }
+""", 1)
+    print("Steam auto-standby applied.")
+else:
+    print("Steam auto-standby NOT applied (anchor missing).")
 c = sub(c, "if (eez_flow_get_current_screen() == SCREEN_ID_STATUS_SCREEN) {",
         "if (activeScreen() == SCREEN_ID_STATUS_SCREEN) {", "cpp:status")
 c = sub(c, "if (eez_flow_get_current_screen() != SCREEN_ID_BREW_SCREEN)",
